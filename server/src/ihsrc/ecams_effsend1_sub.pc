@@ -1,0 +1,205 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_effsend_sub.pc                         │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 영향분석으로 최종소스 이행 처리 SUB          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 10. 02                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		Structure for VARRAW                                     */
+/*---------------------------------------------------------------*/
+typedef struct
+{
+	short len;
+	char  arr[100];
+} vr;
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+    EXEC SQL TYPE vr IS VARRAW(100);
+    vr my_vr;
+EXEC SQL END DECLARE SECTION;
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*      계정/정보계 기존 버전자료 이행 처리  M A I N             */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char 	szSysCD                [dfSysCD];
+char	szRsrcCD              [dfRsrcCD];
+char	szDsnCD               [dfDsnCD];
+char 	szRsrcName          [dfRsrcName];
+char	szItemID              [dfItemID];
+char 	szVolDir                 [dfDir];
+char	szDir                    [dfDir];
+char	szSvrIP                [dfSvrIP];
+char	szSvrCD                [dfSvrCD];
+int 	szSvrSeq                        ;
+int 	nPort                           ;
+char	szEditor              [dfEditor];
+char	szChangDirPath           [dfDir];
+char	szTeam                   [100+1];
+char	szInItemID            [dfItemID];
+int 	szLastVer                       ;
+char	szSysCmd            [dfFullPath];
+char	szLocal             [dfFullPath];
+CMD_INFO	CmdInfo                     ;
+
+
+	if (argc != 4) {
+		fprintf(stderr, "Usage : %s <SYSCD> <DSNCD> <RSRCNME>\n", argv[0]);
+		exit (1);
+	}
+	
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");
+
+	sprintf(szSysCD   , "%s", argv[1]);
+	sprintf(szDsnCD   , "%s", argv[2]);
+	sprintf(szRsrcName, "%s", argv[3]);
+		
+
+    /*-----------------------------------------------------------*/
+    /*   Signal Define			                                 */
+    /*-----------------------------------------------------------*/
+    DefineSignal ();
+
+	nPort = 0;
+	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		fprintf(stderr, "DB 연결 않됨 \n");
+		exit(1);
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", gszTempPath);
+	NotUseDataTruncate(gszTempPath,0x20);
+	if (strlen(gszTempPath) == 0) {
+		strcpy(gszTempPath,"tmp/");
+	}
+	else {
+		if (cmp_right_char(gszTempPath, 1, "/") != 0)
+	       sprintf(gszTempPath,"%s%s", gszTempPath,"/");
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   소스백업 디렉토리                                       */
+    /*-----------------------------------------------------------*/
+	SetTempDir("93", gszBackPath);
+
+			
+	/*-----------------------------------------------------------*/
+	/*	영향분석 서버 정보 조회                                  */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  A.CR_SYSCD
+		      , A.CR_RSRCCD
+		      , A.CR_RSRCNAME
+		      , A.CR_LSTVER
+		      , C.CM_ASTACD
+		      , D.CM_DIRPATH
+		  INTO  :szSysCD
+		  	  , :szRsrcCD
+		  	  , :szRsrcName
+		  	  , :szLastVer
+		  	  , :szASTACD
+		  	  , :szDir
+		  FROM  CMR0020 A
+		      , CMM0030 C
+		      , CMM0070 D
+		 WHERE  A.CR_SYSCD = :szSysCD
+		   AND  A.CR_DSNCD = :szDsnCD
+		   AND  A.CR_RSRNAME = :szRsrcName
+		   AND  A.CR_SYSCD   = C.CM_SYSCD
+		   AND  A.CR_SYSCD  = D.CM_SYSCD
+		   AND  A.CR_DSNCD  = D.CM_DSNCD;
+		   
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"영향분석 서버 ERROR [%d][%s]", sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit (1);
+	}
+
+	NotUseDataTruncate (szSysCD   , 0x20);
+	NotUseDataTruncate (szRsrcCD  , 0x20);
+	NotUseDataTruncate (szRsrcName, 0x20);
+	NotUseDataTruncate (szASTACD  , 0x20);
+
+    /*-----------------------------------------------------------*/
+    /*   버전파일 작성                                           */
+    /*-----------------------------------------------------------*/
+	sprintf(szLocal, "/userdir/apcnadm/ecams/%s/%s/%s/%s"  , szASTACD, szSysCD, szDir, szRsrcName);
+    NotUseDataTruncate (szLocal, 0x20);
+
+	sprintf(szSysCmd, "FileRead_asiscmr0025 %s %s last", szSysCD, szDsnCD, szRsrcName, szLocal);
+	system (szSysCmd);
+	
+
+	sprintf(szSysCmd, "chmod 777 %s", szLocal);
+	system (szSysCmd);
+	
+	
+	#if 0
+	sprintf(CmdInfo.szJobGub,"F");
+	sprintf(CmdInfo.szRemote, "%s/%s", szChangDirPath, szRsrcName);
+	sprintf(CmdInfo.szLocal , "%s", szLocal);	
+	Server_Cmd_JOB(&CmdInfo);
+	if (strcmp(CmdInfo.szRstCond, "0000") != 0) {
+		/*LOG*/sprintf(gszLogMsg,"%s VERSION FILE READ ERROR (<%s><%s><%s> <%s>)", argv[0], szRsrcName,szItemID,CmdInfo.szRemote, CmdInfo.szRstCond);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	}		
+	remove (szLocal);
+	#endif
+	
+	EXEC SQL COMMIT WORK RELEASE;
+	exit (0);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

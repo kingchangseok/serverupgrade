@@ -1,0 +1,300 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_filemake_sub.pc                          │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ORACLE DB (CMR0025)에서 READ하여 파일에      │
+ │            │ Write 하는 프로그램                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		Structure for VARRAW                                     */
+/*---------------------------------------------------------------*/
+#define TERM(X) ( X.arr[X.len] = '\0' )
+#define SLEN(X) ( X.len = strlen((char *)X.arr) )
+
+
+#define READ_SIZE 100
+
+typedef struct
+{
+	short len;
+	char  arr[READ_SIZE];
+} vr;
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+    EXEC SQL TYPE vr IS VARRAW(READ_SIZE);
+    vr my_vr;
+EXEC SQL END DECLARE SECTION;
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	o_error(char *, char *);
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+FILE *fp;
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*    CMR0025에서 READ하여 파일에 Write 처 리   MAIN             */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char  	action_str                 [512];
+long  	amount                          ;
+long  	offset                          ;
+short 	done                            ;
+long  	total                           ;
+char 	szItemID	          [dfItemID];
+char 	szOutName           [dfFullPath];
+char 	szDirName           [dfFullPath];
+char 	szBackPath               [dfDir];
+char 	szCmd               [dfFullPath];
+char	szSysCD                [dfSysCD];
+char	szDsnCD                [dfDsnCD];
+char	szRsrcName          [dfRsrcName];
+char 	szOutNameBack       [dfFullPath];
+char	szSvrIP                     [20];
+char 	szRemoteFile        [dfFullPath];
+int 	retval                          ;
+int	 	szVersion                       ;
+int	 	nCnt                            ;
+int 	nRet                            ;
+int     nPort;
+CMD_INFO	CmdInfo;   
+
+
+	if (argc < 4) {
+        printf ("usage : %s <ITEMID> <OutFileName> <Version> <IP> <PORT> <REMOTEF> \n", argv[0]);
+        exit (0);
+    }
+
+    memset(szItemID    , 0x00, sizeof(szItemID   ));
+    memset(szOutName   , 0x00, sizeof(szOutName   ));
+    memset(szOutNameBack, 0x00, sizeof(szOutNameBack   ));
+    memset(szSvrIP      , 0x00, sizeof(szSvrIP   ));
+    memset(szRemoteFile, 0x00, sizeof(szRemoteFile   ));
+    
+    sprintf(szItemID , "%s", argv[1]);
+	sprintf(szOutName, "%s", argv[2]);
+	sprintf(szOutNameBack, "%s", argv[2]);
+	szVersion =  atoi(argv[3]);
+	if (argc>4) {
+		sprintf(szSvrIP,"%s",argv[4]);
+		nPort = atoi(argv[5]);
+		sprintf(szRemoteFile,"%s",argv[6]);
+	}
+	NotUseDataTruncate (szItemID     , 0x20);
+	NotUseDataTruncate (szOutName    , 0x20);
+	NotUseDataTruncate (szOutNameBack, 0x20);
+	NotUseDataTruncate (szSvrIP      , 0x20);
+	NotUseDataTruncate (szRemoteFile , 0x20);
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/	
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,"_filesend.log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));		
+	
+	/*LOG*/sprintf(gszLogMsg,"[ecams_filemake_sub] start [%s][%s][%s][%s][%s][%d][%d]\n",
+		           szItemID,szOutName,szOutNameBack,szSvrIP,szRemoteFile,nPort,szVersion);
+	  	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		/*LOG*/sprintf(gszLogMsg,"ecams_filemake_sub DB Connect Error\n");
+	  	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+    /*-----------------------------------------------------------*/
+    /*   소켓 STRUCTURE 초기화                                   */
+    /*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+    /*-------------------------------------------------------*/
+    /*   파일의 존재여부 체크                                */
+    /*-------------------------------------------------------*/
+	EXEC SQL
+		SELECT  COUNT(*)
+		  INTO  :nCnt
+		  FROM  CMR0025
+		 WHERE  CR_ITEMID = :szItemID
+		   AND  CR_VER    = :szVersion;
+
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_filemake_sub] CMR0025 Error [%d][%s][%s][%s]\n",
+		           sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc,szItemID,szOutNameBack);
+	  	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		exit(1);
+	}
+
+	if (nCnt == 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_filemake_sub] CMR0025 File Not Found [%s][%d][%s]\n",
+		           szItemID,szVersion,szOutNameBack);
+	  	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		exit(9);
+	}
+	nRet = Right_Char_Check(szOutName, '/');
+	if (nRet > 0) {
+		sprintf(szDirName, "%s", left_char(szOutName, nRet-1));
+		Local_Dir_Make(szDirName);
+	}
+
+	strcat(szOutName,".gz");
+    fp = fopen(szOutName,"wb");
+    
+    /*-------------------------------------------------------*/
+    /*		BLOB READ 하여 FILE 에 WRITE                     */
+    /*-------------------------------------------------------*/
+	EXEC SQL WHENEVER SQLERROR DO o_error(action_str, szOutName);
+    EXEC SQL EXECUTE
+	    BEGIN
+			SELECT  CR_FILE
+			  INTO  blob_it.my_blob
+			  FROM  CMR0025
+			 WHERE  CR_ITEMID = :szItemID
+			   AND  CR_VER    = :szVersion;
+
+	       #ifndef V8
+	       :total := blob_it.get_blob_len;
+	       #else
+	       :total := DBMS_LOB.GETLENGTH(blob_it.my_blob);
+	       #endif
+	    END;
+	END-EXEC;
+
+    amount = READ_SIZE;
+    offset = 1;
+    done   = 0;
+
+    while (!done) {
+	    EXEC SQL EXECUTE
+	        BEGIN
+	            #ifndef V8
+	            blob_it.read_blob(:amount,:offset,:my_vr);
+	            #else
+	            DBMS_LOB.READ(blob_it.my_blob,:amount,:offset,:my_vr);
+	            #endif
+	        END;
+		END-EXEC;
+
+		if (sqlca.sqlcode != 0) {			
+			/*LOG*/sprintf(gszLogMsg,"[ecams_filemake_sub] DBMS_LOB_READ ERROR [%d][%s][%s][%d][%s]\n",
+			           sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc,szItemID,szVersion,szOutNameBack);
+		  	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+			break;
+		}
+
+        offset += amount;
+
+        if (offset > total)
+            done = 1;
+
+        fwrite(my_vr.arr,(size_t)amount,(size_t)1,fp);
+    }
+    fclose(fp);
+    
+    if (access(szOutName,F_OK) != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_filemake_sub] File Make ERROR [%s][%d][%s]\n",
+		           szItemID,szVersion,szOutName);
+	  	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+	}	
+	if (FileSizeInf(szOutName) <= 0) {
+		retval = 1;
+	}
+	else {
+		memset(szCmd,0x00,sizeof(szCmd));
+		sprintf(szCmd,"chmod 777 \"%s\"\n", szOutName);
+		retval = system(szCmd)/256;
+
+		sprintf(szCmd,"ecams_zip -d \"%s\"\n", szOutName);
+		retval = system(szCmd)/256;
+
+		sprintf(szCmd,"chmod 777 \"%s\"\n", szOutNameBack);
+		retval = system(szCmd)/256;
+		retval = 0;
+		remove(szOutName);
+		if (access(szOutNameBack, F_OK) != 0) {
+			retval = 1;
+		}
+	}
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    EXEC SQL ROLLBACK WORK RELEASE;
+    if (retval == 0) {
+	    if (strlen(szSvrIP) >0) {
+	    	sprintf(CmdInfo.szJobGub, "F");
+			sprintf(CmdInfo.szServerIP, "%s" , szSvrIP);
+			CmdInfo.nPort = nPort;
+			sprintf(CmdInfo.szRemote , "%s" , szRemoteFile);
+			sprintf(CmdInfo.szLocal  , "%s" , szOutNameBack);
+		  	Server_Cmd_JOB(&CmdInfo);
+		  	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		  		/*LOG*/sprintf(gszLogMsg,"[%s][%d] file send end [%s][%s][%s]\n",szSvrIP,nPort,CmdInfo.szRemote,CmdInfo.szLocal,CmdInfo.szRstCond);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+			}
+	    }
+	}
+	remove(szOutNameBack);
+    exit (retval);
+}
+
+
+/*---------------------------------------------------------------*/
+/*		ORACLE  ERROR  처리  FUNCTION                            */
+/*---------------------------------------------------------------*/
+int 	o_error	( action_str , szOutName )
+char *action_str;
+char *szOutName;
+{
+int 	i                               ;
+char 	error_str                  [512];
+
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    for ( i = 0; i < sqlca.sqlerrm.sqlerrml; i++ ) {
+        error_str[i] = sqlca.sqlerrm.sqlerrmc[i];
+    }
+
+    error_str[i] = '\0';
+    printf("\nFailed with following Oracle error while %s:\n%s\n",action_str, error_str );
+
+    EXEC SQL ROLLBACK WORK RELEASE;
+
+	char szCmd[1024];
+	sprintf(szCmd, "rm -rf %s ", szOutName);
+	system(szCmd);
+
+    exit(1);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

@@ -1,0 +1,262 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_gensrc.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 형상관리(eCAMS) 자원 파일로 작성             │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include    <ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+  char	   gConnStr                 [50]; /* Connect String      */
+  char     gServerIP           [dfSvrIP]; /* Server IP Address   */
+  char     gDVServerIP         [dfSvrIP]; /* Server IP : TEST    */
+  char     gCSServerIP         [dfSvrIP]; /* Server IP : 적용    */
+  char     gChkSvrIP           [dfSvrIP]; /* Server IP Address   */
+  char     SV_RstCond        [dfRstCode]; /* 처리 결과           */
+  char     gLogMsg                [1024]; /* Logging Message Work*/
+  char     gLogAcptNo         [dfAcptNo]; /* eCAMS Log 접수번호  */
+  char     gLogFile         [dfFullPath]; /* eCAMS Logging File  */
+  int      gErrNo                       ;
+EXEC SQL END DECLARE SECTION;
+
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+int      cSockId    ;                 /* Connect Socket ID       */
+int  	 gRcvFd     ;                 /* 수신용 File Pointer     */
+int  	 gSndFd     ;                 /* 송신용 File Pointer     */
+int  	 gProcStep  ;                 /* 송신/수신 상태          */
+int  	 gProcWork  ;                 /* 송신/수신 여부          */
+int  	 gFileOffset;                 /* 파일 송신 OffSet        */
+char     systime  [16], sysdate [16]; /* 시스템일자, 시간        */
+
+
+int     nRet1          ;              /* Char Find Work          */
+int     CurrCnt        ;              /* Source Line Count       */
+
+time_t       time_clock;
+
+/*---------------------------------------------------------------*/
+/*   eCAMS  LOGGING 관련  CONSTANT                               */
+/*---------------------------------------------------------------*/
+FILE   *fd;                           /* Logging File Pointer    */
+struct stat  f_st;                    /* Logging File Struct     */
+struct tm   *loc;                     /* File 정보 Read Pointer  */
+
+char   LogTemp         [256];         /* Logging Message         */
+char   ERRMsg          [160];         /* Error Message           */
+
+extern    int    errno;               /* 시스템 오류코드         */
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       Generate Source  처리  M A I N                          */
+/*                                                               */
+/*   Parameter  :                                                */
+/*      1. 시스템구분                                            */
+/*      2. 자원구분                                              */
+/*      3. DsnCD                                                 */
+/*      4. 자원이름                                              */
+/*      5. 자원버젼                                              */
+/*      6. 요청자아이디                                          */
+/*****************************************************************/
+int 	main (int argc, char **argv, char **envp)
+{
+char	GenFile             [dfFullPath];
+char	szType                      [20];
+char	szItemID              [dfItemID];
+char	szOutFileName       [dfFullPath];
+char	szOutFullName       [dfFullPath];
+char	szAcptNo              [dfAcptNo];
+int		nVer                            ;
+char	tmpDir                   [dfDir];
+char	szCommand           [dfFullPath];
+int		nRet                            ;
+char	iconvFileName       [dfFullPath];
+char	szRsrcName          [dfRsrcName];
+char	szRsrcCD              [dfRsrcCD];
+char	gDVServerIP            [dfSvrIP];
+char	SvrPath                  [dfDir];
+char	Dev_ProgPath            [dfDir] ;
+char	szSysCD                [dfSysCD];
+int 	dfSendPort                      ;
+int		szSvrSeq                        ;
+int		chkUncomp                       ;
+int		rc                              ;
+
+CMD_INFO	  CmdInfo;
+
+
+    if (argc < 5) {
+		printf ("Usage : %s <날짜/ALL> \n", argv[0]);
+        exit (1);
+    }
+    
+	/*-----------------------------------------------------------*/
+	/*	소켓 명령 변수 초기화                                    */
+	/*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+	
+	
+    memset(szType       , 0x00, sizeof(szType       ));
+	strcpy(szType       , argv[1]);
+	
+	/*
+	if (strcmp(szType,"ALL") == 0) {
+	}
+	else
+	if (strcmp(szType,"CMR0025") == 0) {
+		nVer = atoi(argv[4]);
+	}
+	else {
+		strcpy(szAcptNo, argv[4]);
+	}
+  */
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", tmpDir);
+	NotUseDataTruncate(tmpDir, 0x20);
+
+	memset(szCommand, 0x00, sizeof(szCommand));
+    chkUncomp = checkUnComp(szItemID);
+    sprintf(szOutFullName,"%s/%s" ,tmpDir,  szOutFileName);
+    remove (szOutFullName);
+
+	/*-------------------------------------------------------*/
+	/*   개발서버에서 가져와 비교                            */
+    /*-------------------------------------------------------*/
+	EXEC SQL DECLARE VerFile  CURSOR FOR
+		SELECT  A.CR_ITEMID
+		      , B.CM_DIRPATH
+		      , A.CR_LSTVER
+		  FROM  CMR0020 A
+		      , CMM0070 B
+		 WHERE  A.CR_SYSCD = B.CM_SYSCD
+		   AND  A.CR_DSNCD  = B.CM_DSNCD
+		   AND  A.CR_LSTVER > 0
+		   AND  A.CR_STATUS NOT IN('3','9');
+
+
+	EXEC SQL open  VerFile;
+	errcnt0020 = 0;
+	while(1) {
+		EXEC SQL FETCH  VerFile
+			INTO  :szItemID
+				, :Dev_ProgPath
+				, :nVer;
+		
+    if (sqlca.sqlcode != 0) {
+	    fprintf(stderr, "SQLErrCheck 1: DEV Server 정보 오류 [%s] 01 [%d] [%s]\n", szItemID, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+	    exit (3);
+    }
+
+	    NotUseDataTruncate(szItemID, 0x20);
+	    NotUseDataTruncate(Dev_ProgPath   , 0x20);
+	    
+    	sprintf(szOutFullName,"%s/%s" ,tmpDir,  szOutFileName);
+    
+	    sprintf(szRsrcName, "%s", trunc_char(szRsrcName));
+	
+		sprintf(szCommand,"FileRead_cmr0025 %s %s %d", szItemID,szOutFullName,nVer);
+		system(szCommand);
+	
+		if (access(szOutFullName, F_OK) != 0) {
+			exit (3);
+		}
+	}
+	
+	
+	#if 0
+	/*-----------------------------------------------------------*/
+	/*   파일 복호화이면 파일의 복호화 처리                      */
+	/*-----------------------------------------------------------*/
+	if (chkUncomp == 1) {
+		sprintf(szCommand,"java -jar UnComp.jar %s/%s",tmpDir, szOutFileName);
+		system(szCommand);
+	}
+
+	memset(iconvFileName, 0x00, sizeof(iconvFileName));
+	memset(szCommand    , 0x00, sizeof(szCommand    ));
+	sprintf(iconvFileName,"%s/%s.iconv", tmpDir,szOutFileName);
+	sprintf(szCommand,"iconv -f UTF-8 -t IBM-eucKR %s/%s > %s", tmpDir, szOutFileName, iconvFileName);
+	nRet = system(szCommand)/256;
+
+	if (nRet == 0) {
+		sprintf(szCommand,"mv %s %s/%s ",iconvFileName,tmpDir,szOutFileName);
+		system(szCommand);
+	}
+	else {
+		remove(iconvFileName);
+	}
+	#endif
+    exit (0);
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : checkUnComp                                      */
+/*	Action    : 파일복호화 여부 조회                             */
+/*  Parameter : pItemId : 프로그램등록번호                       */
+/*  Return    : 1 : 복호화함, 0 : 복호화 안함                    */
+/*---------------------------------------------------------------*/
+int 	checkUnComp	( char *pItemId
+					)
+{
+char	unCompChk                    [2];
+
+
+	EXEC SQL
+		SELECT  SUBSTR(A.CM_INFO,36,1)
+		  INTO  :unCompChk
+		  FROM  CMR0020 B
+		      , CMM0036 A
+		 WHERE  B.CR_ITEMID = :pItemId
+		   AND  B.CR_SYSCD  = A.CM_SYSCD
+		   AND  B.CR_RSRCCD = A.CM_RSRCCD;
+
+	if (sqlca.sqlcode != 0) {
+		memset(unCompChk, 0x00, sizeof(unCompChk));
+	}
+	NotUseDataTruncate (unCompChk, 0x20);
+
+	return strcmp(unCompChk,"1")==0?1:0;
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

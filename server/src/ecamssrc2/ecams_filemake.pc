@@ -1,0 +1,274 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_filemake.pc                               │
+ ├──────┼───────────────────────┤
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2013. 04. 15                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE SQLCA;
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	ConnectDB();
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+char gszLogFile[50];	/*Log File Name*/
+char gszLogPath[100];	/*Log File Path*/
+char gszLogMsg[512];	/*Log Message  */
+char gszTempPath[100];	/*Temp Direcotry*/
+
+
+
+
+
+
+int		main (int argc, char **argv, char **envp)
+{
+	char	szAcptNo[21];
+	char	szSysCD[6];
+	char	szRsrcCD[128];
+	char	szDsnCD[8];
+	char	szRsrcName[512];
+	int		szSerNo;
+	char	szBaseNo[21];
+	char	szReqCD[3];
+	char	szSysGB[2];
+	char	szEditor[512];
+	char	szItemId[13];
+	char    pSysCD[6];
+	char    szSvrCD   [dfSvrCD];
+	char    szJobCD   [dfJobCD];
+	
+	char	szCommand[5000];
+	char    szDirPath[512];
+	char    szOutHome[512];
+	char	szGbnCd[10];
+	char    szSvrIP[20];
+	char    szDate[9];
+	int     nPort;
+	
+	int		nRet;
+	int		ncnt;
+	int     nLastVer;
+	int     nSvrSeq;
+	char	QryStr   [5000];
+	char    szChangDirPath   [512];
+	
+	
+	if (argc < 5) {
+        printf ("Usage : %s <gbncd : LOCAL,SERVERCD> <syscd> <rsrccd> <date> <outhomedir> \n", argv[0]);
+        exit (0);
+    } else {
+    	if (strcmp(argv[1],"LOCAL") != 0 && argc < 5) {
+	        printf ("Usage [REMOTE] : %s <gbncd : LOCAL,SERVERCD> <syscd> <rsrccd> <date> <outhomedir>  \n", argv[0]);
+	        exit (0);
+    	} else if (strcmp(argv[1],"LOCAL") == 0 && argc < 6) {
+	        printf ("Usage [REMOTE] : %s <gbncd : LOCAL,SERVERCD> <syscd> <rsrccd> <date> <outhomedir>  \n", argv[0]);
+	        exit (0);
+    	}
+	}
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,"_filesend.log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));	
+
+	memset(szSysCD    , 0x00, sizeof(szSysCD   ));
+    memset(szRsrcCD   , 0x00, sizeof(szRsrcCD  ));
+    memset(szOutHome  , 0x00, sizeof(szOutHome ));
+    memset(szGbnCd    , 0x00, sizeof(szGbnCd   ));
+    memset(szSvrIP    , 0x00, sizeof(szSvrIP   ));
+    memset(szDate     , 0x00, sizeof(szDate   ));
+    
+	sprintf(szGbnCd   , "%s", argv[1]);  
+	sprintf(szSysCD   , "%s", argv[2]);    
+	sprintf(szRsrcCD  , "%s", argv[3]);     
+	sprintf(szDate    , "%s", argv[4]);  
+	sprintf(szOutHome , "%s", argv[5]); 
+	NotUseDataTruncate (szGbnCd     , 0x20);
+	NotUseDataTruncate (szSysCD     , 0x20);
+	NotUseDataTruncate (szRsrcCD    , 0x20);
+	NotUseDataTruncate (szDate      , 0x20);
+	/*
+	if (strcmp(szGbnCd,"LOCAL") != 0) { 
+		sprintf(szSvrIP , "%s", argv[6]);
+		nPort = atoi(argv[7]);
+	}*/
+	NotUseDataTruncate (szOutHome    , 0x20);
+	NotUseDataTruncate (szSvrIP      , 0x20);
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE){
+		/*LOG*/sprintf(gszLogMsg,"FileMake DB Connect Error\n");
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}	
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", gszTempPath);
+	
+	/*LOG*/sprintf(gszLogMsg,"[%s] ecams_filemake 처리 시작 [%s] [%s][%s][%s]",szSysCD,szRsrcCD,szOutHome,szDate,gszTempPath);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	
+	memset (QryStr, 0x00,  sizeof(QryStr));
+	ncnt = 0;
+	if (strcmp(szGbnCd,"LOCAL") != 0) {
+		sprintf(QryStr,"%s SELECT	DISTINCT                                                          \n",QryStr);
+		sprintf(QryStr,"%s			A.CR_ITEMID,                                                      \n",QryStr); 
+		sprintf(QryStr,"%s			A.CR_SYSCD,                                                       \n",QryStr);
+		sprintf(QryStr,"%s			A.CR_RSRCNAME,                                                    \n",QryStr);
+		sprintf(QryStr,"%s			A.CR_LSTVER,                                                      \n",QryStr);
+		sprintf(QryStr,"%s			B.CM_DIRPATH,                                                     \n",QryStr);
+		sprintf(QryStr,"%s			D.CM_SVRIP,                                                       \n",QryStr);
+		sprintf(QryStr,"%s			D.CM_PORTNO,C.CM_RSRCCD,D.CM_SEQNO,A.CR_JOBCD,D.CM_SVRCD          \n",QryStr);
+		sprintf(QryStr,"%s	FROM	CMM0038 E,CMM0031 D,CMM0036 C,CMM0070 B,CMR0020 A                 \n",QryStr);
+		sprintf(QryStr,"%s	WHERE	A.CR_SYSCD=DECODE('%s','ALL',A.CR_SYSCD,'%s')                     \n",QryStr,szSysCD,szSysCD);
+		sprintf(QryStr,"%s	  AND INSTR(DECODE('%s','ALL',A.CR_RSRCCD,'%s'),A.CR_RSRCCD)>0            \n",QryStr,szRsrcCD,szRsrcCD);
+		sprintf(QryStr,"%s	  AND A.CR_LSTVER>0                                                       \n",QryStr);
+		if (strcmp(szDate,"ALL") != 0) {
+			sprintf(QryStr,"%s	  AND A.CR_ITEMID IN (SELECT CR_ITEMID FROM CMR0021                   \n",QryStr);
+			sprintf(QryStr,"%s	                       WHERE TO_CHAR(CR_PRCDATE,'YYYYMMDD')>='%s')    \n",QryStr,szDate);	
+		}
+		sprintf(QryStr,"%s	  AND A.CR_STATUS NOT IN ('C','9')                                        \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_SYSCD=B.CM_SYSCD                                               \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_DSNCD=B.CM_DSNCD                                               \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_SYSCD=C.CM_SYSCD                                               \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_RSRCCD=C.CM_RSRCCD                                            \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_SYSCD=D.CM_SYSCD   		                                      \n",QryStr);
+		sprintf(QryStr,"%s	  AND D.CM_SVRCD='%s'   		                                          \n",QryStr,szGbnCd);
+		sprintf(QryStr,"%s	  AND D.CM_CLOSEDT IS NULL   		                                      \n",QryStr);
+		sprintf(QryStr,"%s	  AND D.CM_SYSCD=E.CM_SYSCD   		                                      \n",QryStr);
+		sprintf(QryStr,"%s	  AND D.CM_SVRCD=E.CM_SVRCD   		                                      \n",QryStr);
+		sprintf(QryStr,"%s	  AND D.CM_SEQNO=E.CM_SEQNO   		                                      \n",QryStr);
+		sprintf(QryStr,"%s	  AND C.CM_RSRCCD=E.CM_RSRCCD 		                                      \n",QryStr);
+	} else {
+		sprintf(QryStr,"%s SELECT	DISTINCT                                                          \n",QryStr); 
+		sprintf(QryStr,"%s			A.CR_ITEMID,                                                      \n",QryStr); 
+		sprintf(QryStr,"%s			A.CR_SYSCD,                                                       \n",QryStr);
+		sprintf(QryStr,"%s			A.CR_RSRCNAME,                                                    \n",QryStr);
+		sprintf(QryStr,"%s			A.CR_LSTVER,                                                      \n",QryStr);
+		sprintf(QryStr,"%s			B.CM_DIRPATH, '', 0, C.CM_RSRCCD,0,A.CR_JOBCD,''                  \n",QryStr);
+		sprintf(QryStr,"%s	FROM	CMM0036 C,CMM0070 B,CMR0020 A                                     \n",QryStr);
+		sprintf(QryStr,"%s	WHERE	A.CR_SYSCD=DECODE('%s','ALL',A.CR_SYSCD,'%s')                     \n",QryStr,szSysCD,szSysCD);
+		sprintf(QryStr,"%s	  AND INSTR(DECODE('%s','ALL',A.CR_RSRCCD,'%s'),A.CR_RSRCCD)>0            \n",QryStr,szRsrcCD,szRsrcCD);
+		sprintf(QryStr,"%s	  AND A.CR_LSTVER>0                                                       \n",QryStr);
+		if (strcmp(szDate,"ALL") != 0) {
+			sprintf(QryStr,"%s	  AND A.CR_ITEMID IN (SELECT CR_ITEMID FROM CMR0021                   \n",QryStr);
+			sprintf(QryStr,"%s	                       WHERE TO_CHAR(CR_PRCDATE,'YYYYMMDD')>='%s')    \n",QryStr,szDate);	
+		}
+		sprintf(QryStr,"%s	  AND A.CR_STATUS NOT IN ('C','9')                                        \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_SYSCD=B.CM_SYSCD                                               \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_DSNCD=B.CM_DSNCD                                               \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_SYSCD=C.CM_SYSCD                                               \n",QryStr);
+		sprintf(QryStr,"%s	  AND A.CR_RSRCCD=C.CM_RSRCCD                                             \n",QryStr);
+		sprintf(QryStr,"%s	  AND SUBSTR(C.CM_INFO,12,1)='1' 		                                  \n",QryStr);
+	}
+	EXEC SQL PREPARE S FROM :QryStr;
+	EXEC SQL DECLARE CHKDOC_CUR CURSOR FOR S;
+	printf("ecams_filemake qruery 1 [%s]", QryStr);
+	EXEC SQL open  CHKDOC_CUR;
+
+
+    while (1) 
+	{
+		EXEC SQL fetch CHKDOC_CUR into  :szItemId, :pSysCD, :szRsrcName, :nLastVer, :szDirPath, :szSvrIP, :nPort, 
+			                            :szRsrcCD, :nSvrSeq, :szJobCD,   :szSvrCD;
+
+		if (sqlca.sqlcode == 1403)	break;		
+		
+		if (sqlca.sqlcode != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] select cmr0020 error [%d] [%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			exit(1);			
+		}
+		NotUseDataTruncate (szItemId     , 0x20);
+		NotUseDataTruncate (pSysCD       , 0x20);
+		NotUseDataTruncate (szRsrcName   , 0x20);
+		NotUseDataTruncate (szDirPath    , 0x20);
+		NotUseDataTruncate (szSvrIP      , 0x20);
+		NotUseDataTruncate (szRsrcCD     , 0x20);
+		NotUseDataTruncate (szJobCD      , 0x20);
+		NotUseDataTruncate (szSvrCD      , 0x20);
+		
+						 
+		while (1) {
+			nRet = 0;
+			sprintf (szCommand, "procck ecams_filemake_sub");
+			nRet = system(szCommand) / 256;	
+
+			if (nRet < 10) break;
+		}
+				 
+		memset(szCommand,0x00,sizeof(szCommand));
+		++ncnt;
+		if (strcmp(szGbnCd,"LOCAL") == 0) { 
+			sprintf(szDirPath,"%s/%s/%s",szOutHome,szSysCD,szDirPath);
+			sprintf(szCommand,"./ecams_filemake_sub \"%s\" \"%s/%s\" %d & "
+						 ,szItemId, szDirPath,szRsrcName,nLastVer);	
+		} else {
+			nRet = ChangeVolPath(pSysCD , szSvrCD, szRsrcCD, szJobCD, nSvrSeq, szDirPath, szChangDirPath);
+			if (nRet != 0) {
+				sprintf(gszLogMsg,"[ecams_filemake] ChangeVolPath Fail : [%s][%s][%s][%s][%d][%s]",pSysCD , szSvrCD, szRsrcCD, szJobCD, nSvrSeq, szDirPath);
+			    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				continue;	
+			}
+			sprintf(szCommand,"./ecams_filemake_sub \"%s\" \"%s/%s\" %d %s %d \"%s/%s\" & "
+						 ,szItemId, gszTempPath,szItemId,nLastVer,szSvrIP,nPort,szChangDirPath,szRsrcName);	
+			sprintf(gszLogMsg,"ecams_filemake_sub call [%s]\n",szCommand);
+			/*sprintf(gszLogMsg,"ecams_filemake_sub call [%s][%s/%s][%d][%s][%d][%s][%s]\n",
+			                  szItemId, gszTempPath,szItemId,nLastVer,szSvrIP,nPort,szChangDirPath,szRsrcName);*/
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		}	
+		system(szCommand);
+  }
+  EXEC SQL WHENEVER NOT FOUND CONTINUE;
+  EXEC SQL CLOSE CHKDOC_CUR;	
+	
+	
+	do{
+		sleep(3);
+		sprintf (szCommand, "procck %s", "ecams_filemake_sub");
+		nRet = system (szCommand) / 256;
+	}while(nRet > 0);
+		
+		
+	/*LOG*/sprintf(gszLogMsg,"[%s] ecams_filemake 처리 종료 [%d]\n",szAcptNo,ncnt);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+	exit(0);
+		
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

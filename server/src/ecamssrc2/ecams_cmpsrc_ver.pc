@@ -1,0 +1,803 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_cmpsrc.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ File Compare (diff)                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2010. 01. 19                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int  	Make_DiffFile 		();
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+char	SysCmd                    [1024]; /* 시스템 명령문       */
+char	devFile                     [50]; /* Local File SaveFile */
+int 	nRet1                           ; /* Char Find Work      */
+int 	CurrCnt                         ; /* Source Line Count   */
+
+char   **gEnvp                          ;
+extern    int    errno                  ;
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Make_DiffFile                                    */
+/*	Function  : 변경전/변경후 파일 작성                          */
+/*	Parameter : RsrcFile  : 원시파일                             */
+/*              DiffFile  : 비교파일                             */
+/*              RstFile   : 변경전/변경후 결과 파일              */
+/*              diffcode  : 변경전/변경후 구분코드               */
+/*	Return    : 결과코드                                         */
+/*---------------------------------------------------------------*/
+int 	Make_DiffFile	( char *RsrcFile
+						, char *DiffFile
+						, char *RstFile
+						, int   diffcode
+						)
+{
+FILE	*OLDPtr                         ;
+FILE	*DiffPtr                        ;
+FILE	*RstPtr                         ;
+char	LeftStr                     [20];
+char	RightStr                    [20];
+char	DiffCmd                      [5];
+int 	Line1                           ;
+int 	Line2                           ;
+int 	Line3                           ;
+int 	Line4                           ;
+int 	i                               ;
+char	szCntWK                    [256];
+char	*dummy                   ; /* Read Buffer         */
+long	nFileSize              ;
+long	nFileSize2              ;
+
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (Diff File)                                   */
+    /*-----------------------------------------------------------*/
+    if ((DiffPtr = fopen(DiffFile,"r")) == (FILE *) NULL) {
+    	printf("FILE OPEN ERROR 1 %s\n", DiffFile);
+        return (-1);
+    }
+
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (OLD/NEW File)                                */
+    /*-----------------------------------------------------------*/
+    if ((OLDPtr = fopen(RsrcFile,"r")) == (FILE *) NULL) {
+    	printf("FILE OPEN ERROR 2 %s\n", RsrcFile);
+    	fclose (DiffPtr);
+        return (-1);
+    }
+    
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (Result File)                                 */
+    /*-----------------------------------------------------------*/
+    if ((RstPtr = fopen(RstFile,"w")) == (FILE *) NULL) {
+    	printf("FILE OPEN ERROR 3 %s\n", RstFile);
+    	fclose (DiffPtr);
+    	fclose (OLDPtr);
+        return (-1);
+    }
+    nFileSize = FileSizeInf(RsrcFile) + 1;
+    nFileSize2 = FileSizeInf(RsrcFile) + 1;
+/*
+    if (nFileSize  > 8192)	nFileSize  = 8192;
+    if (nFileSize2 > 8192)	nFileSize2 = 8192;
+*/
+    if (nFileSize2 == 0) nFileSize2 = nFileSize;
+    if (nFileSize > nFileSize2) {
+    	dummy = (char *)malloc(nFileSize);
+		memset(dummy, 0x00, nFileSize);
+	} else {
+		dummy = (char *)malloc(nFileSize2);
+		memset(dummy, 0x00, nFileSize2);	
+	}
+	
+    CurrCnt = 0;
+    while (fgets(dummy, nFileSize2, DiffPtr) != (char *)NULL) {
+	    /*if (strlen(dummy) == 0)	break;*/
+        /*-------------------------------------------------------*/
+    	/* Return Valure Truncate                                */
+        /*-------------------------------------------------------*/
+        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+        /*-------------------------------------------------------*/
+    	/*    변경기록 Line 추출                                 */
+        /*-------------------------------------------------------*/
+        if (memcmp(dummy,"0",1) >= 0 &&
+            memcmp(dummy,"9",1) <= 0 ) {
+           nRet1 = Char_Check(dummy, "d");
+           if (nRet1 < 0) {
+              nRet1 = Char_Check(dummy, "a");
+              if (nRet1 < 0) {
+                 nRet1 = Char_Check(dummy, "c");
+                 if (nRet1 < 0) {
+                     printf("DIFF Check Error  %s\n", dummy);
+                 }
+              }
+           }
+
+           /*----------------------------------------------------*/
+           /*   변경 Line 계산                                   */
+           /*     OLD (From/TO),  TO (From/TO)                   */
+           /*----------------------------------------------------*/
+           if (nRet1 >= 0) {
+              memset(LeftStr, 0x00, sizeof(LeftStr));
+              memset(RightStr, 0x00, sizeof(RightStr));
+              memset(DiffCmd, 0x00, sizeof(DiffCmd));
+
+              memcpy(LeftStr, dummy, nRet1);
+              memcpy(RightStr, &dummy[nRet1+1], strlen(dummy)-nRet1);
+              memcpy(DiffCmd, &dummy[nRet1], 1);
+
+              nRet1 = Char_Check(LeftStr, ",");
+              if (nRet1 < 0) {
+              	 Line1 = atoi(LeftStr);
+              	 Line2 = atoi(LeftStr);
+              }
+              else {
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", left_char(LeftStr, nRet1));
+				Line1 = atoi(szCntWK);
+
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", right_char(LeftStr, strlen(LeftStr)-nRet1-1));
+				Line2 = atoi(szCntWK);
+              }
+
+              nRet1 = Char_Check(RightStr, ",");
+              if (nRet1 < 0) {
+              	 Line3 = atoi(RightStr);
+              	 Line4 = atoi(RightStr);
+              }
+              else {
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", left_char(RightStr, nRet1));
+				Line3 = atoi(szCntWK);
+
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", right_char(RightStr, strlen(RightStr)-nRet1-1));
+				Line4 = atoi(szCntWK);
+              }
+           }
+
+           /*----------------------------------------------------*/
+    	   /*    변경전 파일 작성                                */
+           /*----------------------------------------------------*/
+           if (diffcode == 1) {
+              /*-------------------------------------------------*/
+    	      /*    Delete Line 작성                             */
+              /*-------------------------------------------------*/
+              if (memcmp(DiffCmd, "d", 1) == 0) {
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line1)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line2)
+                       fprintf(RstPtr, "D %s\r\n", dummy);
+
+                    if (CurrCnt == Line2) break;
+                 }
+              }
+
+              /*-------------------------------------------------*/
+              /*    Insert Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "a", 1) == 0) {
+				 if (Line2 == 0) {
+					for (i = Line3; i <= Line4; i++) {
+						fprintf(RstPtr, "  \r\n");
+					}
+					continue;
+				 }
+
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line1)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt == Line2) {
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+
+                       for (i = Line3; i <= Line4; i++) {
+                       	   fprintf(RstPtr, "  \r\n");
+                       }
+                    }
+
+                    if (CurrCnt == Line2) break;
+                 }
+              }
+
+
+              /*-------------------------------------------------*/
+              /*    Change Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "c", 1) == 0) {
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line1)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line2) {
+                       fprintf(RstPtr, "RO%s\r\n", dummy);
+                    }
+
+                    if (CurrCnt == Line2) {
+                       if (Line4-Line3 > Line2-Line1) {
+                          for (i = 1; i <= (Line4-Line3) - (Line2-Line1); i++) {
+                       	      fprintf(RstPtr, "  \r\n");
+                          }
+                       }
+                       break;
+                    }
+                 }
+              }
+           }
+
+           /*----------------------------------------------------*/
+    	   /*    변경후 파일 작성                                */
+           /*----------------------------------------------------*/
+           else {
+              /*-------------------------------------------------*/
+              /*    Insert Line 작성                             */
+              /*-------------------------------------------------*/
+              if (memcmp(DiffCmd, "a", 1) == 0) {
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line3)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line4)
+                       fprintf(RstPtr, "I %s\r\n", dummy);
+
+                    if (CurrCnt == Line4) break;
+                 }
+              }
+
+              /*-------------------------------------------------*/
+    	      /*    Delete Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "d", 1) == 0) {
+                 while (1) {
+                    if (CurrCnt < Line3) {
+                       	if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+			            /*if (strlen(dummy) == 0)	break;*/
+
+				        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+				        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+				        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+
+						CurrCnt++;
+						fprintf(RstPtr, "  %s\r\n", dummy);
+                    }
+
+                    else if (CurrCnt == Line3) {
+                       for (i = Line1; i <= Line2; i++) {
+                       	   fprintf(RstPtr, "D \r\n");
+                       }
+
+                       break;
+                    }
+                 }
+              }
+
+
+              /*-------------------------------------------------*/
+              /*    Change Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "c", 1) == 0) {
+                 while (1) {
+					if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+					/*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+
+                    CurrCnt++;
+                    if (CurrCnt < Line3)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line4) {
+						if (CurrCnt <= (Line2 - Line1 + Line3))
+                       		fprintf(RstPtr, "RN%s\r\n", dummy);
+                       	else
+                       		fprintf(RstPtr, "I %s\r\n", dummy);
+                    }
+
+                    if (CurrCnt == Line4) {
+                       if (Line2-Line1 > Line4-Line3) {
+                          for (i = 1; i <= (Line2-Line1) - (Line4-Line3); i++) {
+                       	      fprintf(RstPtr, "RN\r\n");
+                          }
+                       }
+                       break;
+                    }
+                 }
+              }
+           }
+       }
+    }
+
+	while (1) {
+       	if (fgets(dummy, nFileSize, OLDPtr) == (char *)NULL ) break;
+	    /*if (strlen(dummy) == 0)	break;*/
+
+        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+        sprintf(dummy, "%s", trunc_char(dummy));
+
+		CurrCnt++;
+		fprintf(RstPtr, "  %s \r\n", dummy);
+	}
+    fclose (DiffPtr);
+    fclose (OLDPtr);
+    fclose (RstPtr);
+
+    return 1;
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : MakeFileWithVer                                  */
+/*	Function  : 버전파일 작성                                    */
+/*	Parameter : pItemCD : 프로그램등록번호                       */
+/*              pLocal  : 로컬파일명                             */
+/*              gVer    : 작성버전                               */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	MakeFileWithVer	( char *pItemCD, char *pLocal, char *gVer, char *pAcptno)
+{
+int 	i                               ;
+int 	nVersion                        ;
+char 	gDVServerIP                 [20];
+char 	gSvrIp                      [20];
+char 	SvrPath                  [dfDir];
+char 	Dev_ProgPath             [dfDir];
+int  	dfSendPort                      ;
+char 	szSysCD                [dfSysCD];
+char 	szRsrcCD              [dfRsrcCD];
+char 	szStatus                     [2];
+char 	gRsrcName           [dfPhysName];
+int	 	szSvrSeq                        ;
+char 	iconvFileName       [dfFullPath];
+char 	szOzRsrc              [dfRsrcCD];
+int  	mRet                            ;
+int  	nNewVer                         ;
+
+CMD_INFO	CmdInfo                     ;
+
+
+    /*-----------------------------------------------------------*/
+    /*   소켓 STRUCTURE 초기화                                   */
+    /*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+
+	memset(szOzRsrc, 0x00, sizeof(szOzRsrc));
+	memset(szStatus, 0x00, sizeof(szStatus));
+
+    /*-----------------------------------------------------------*/
+    /*   자원정보 조회                                           */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CR_RSRCCD
+		      , CR_LSTVER
+		      , CR_STATUS
+		  INTO  :szOzRsrc
+		  	  , :nNewVer
+		  	  , :szStatus
+		  FROM  CMR0020
+		 WHERE  CR_ITEMID = :pItemCD;
+
+	if (sqlca.sqlcode != 0) {
+		memset(szOzRsrc, 0x00, sizeof(szOzRsrc));
+	}
+
+	NotUseDataTruncate(szOzRsrc, 0x20);
+	NotUseDataTruncate(szStatus, 0x20);
+
+	/*-----------------------------------------------------------*/
+	/*	버젼에 접수번호가 들어왔을 경우 체크인 중인 파일과 비교  */
+	/*-----------------------------------------------------------*/
+	if (strlen(gVer) > 5 && cmp_left_char(gVer, 1, "R") != 0 ) {
+		if (strcmp(szStatus,"0") != 0 || strcmp(szStatus,"5") != 0) {
+			sprintf(SysCmd,"FileRead_cmr0027 %s %s %s",gVer, pItemCD, pLocal);
+			system(SysCmd);
+
+			memset(iconvFileName,0x00,sizeof(iconvFileName));
+			sprintf(iconvFileName,"%s.iconv",pLocal);
+			sprintf(SysCmd,"iconv -f UTF-8 -t eucKR %s > %s ",pLocal,iconvFileName);
+			mRet = system(SysCmd)/256;
+
+			if (mRet == 0) {
+				sprintf(SysCmd,"mv %s %s ",iconvFileName,pLocal);
+				system(SysCmd);
+			}
+			else {
+				remove(iconvFileName);
+			}
+			return ;
+		}
+		else {
+			gVer = "NEW";
+		}
+	}
+
+    /*-----------------------------------------------------------*/
+	/*   개발서버에서 가져와 비교                                */
+    /*-----------------------------------------------------------*/
+	if (strcmp(gVer, "T") == 0) {
+
+		EXEC SQL
+			SELECT  DISTINCT
+			        A.CM_SVRIP
+			      , A.CM_PORTNO
+			      , A.CM_SEQNO
+			      , C.CR_RSRCCD
+			      , C.CR_SYSCD
+			      , C.CR_RSRCNAME
+			      , D.CM_DIRPATH
+			  INTO	:gDVServerIP
+			  	  , :dfSendPort
+			  	  , :szSvrSeq
+			  	  , :szRsrcCD
+			  	  , :szSysCD
+			  	  , :gRsrcName
+			  	  , :SvrPath
+			  FROM  CMM0031 A
+			      , CMM0038 B
+			      , CMR0020 C
+			      , CMM0070 D
+			 WHERE  C.CR_ITEMID = :pItemCD
+			   AND  A.CM_SVRCD  = '01'
+			   AND  A.CM_CLOSEDT IS NULL
+			   AND  C.CR_SYSCD  = A.CM_SYSCD
+			   AND  C.CR_RSRCCD = B.CM_RSRCCD
+			   AND  A.CM_SYSCD  = B.CM_SYSCD
+			   AND  A.CM_SVRCD  = B.CM_SVRCD
+			   AND  A.CM_SEQNO  = B.CM_SEQNO
+			   AND  C.CR_SYSCD  = D.CM_SYSCD
+			   AND  C.CR_DSNCD  = D.CM_DSNCD;
+
+	    if (sqlca.sqlcode != 0) {
+		    printf("SQLErrCheck 3: TEST Server 정보 오류 [%s] 01 [%d] [%s]\n", pItemCD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		    exit (3);
+	    }
+
+	    NotUseDataTruncate(gDVServerIP, 0x20);
+	    NotUseDataTruncate(szRsrcCD   , 0x20);
+	    NotUseDataTruncate(szSysCD    , 0x20);
+	    NotUseDataTruncate(SvrPath    , 0x20);
+        sprintf(gRsrcName, "%s", trunc_char(gRsrcName));
+
+	    ChangeVolPath(szSysCD , "01", szRsrcCD, szSvrSeq, SvrPath, Dev_ProgPath);
+
+	    sprintf(CmdInfo.szJobGub, "G");
+		sprintf(CmdInfo.szServerIP, "%s" , gDVServerIP);
+		CmdInfo.nPort = dfSendPort;
+		sprintf(CmdInfo.szRemote , "%s/%s" , Dev_ProgPath, gRsrcName);
+		sprintf(CmdInfo.szLocal  , "%s" , pLocal);
+	  	Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO(&CmdInfo);
+		
+		if (strcmp(CmdInfo.szRstCond, "0000") != 0) return;
+
+	    
+		memset(iconvFileName,0x00,sizeof(iconvFileName));
+		sprintf(iconvFileName,"%s.iconv",pLocal);
+		sprintf(SysCmd,"iconv -f UTF-8 -t eucKR %s > %s ",pLocal,iconvFileName);
+		mRet = system(SysCmd)/256;
+
+		if (mRet == 0) {
+			sprintf(SysCmd,"mv %s %s ",iconvFileName,pLocal);
+			system(SysCmd);
+		}
+		else {
+			remove(iconvFileName);
+		}
+
+		return;
+	} else if (cmp_left_char(gVer, 1, "R") == 0) {
+	/*-----------------------------------------------------------*/
+	/*   운영서버에서 가져와 비교                                */
+    /*-----------------------------------------------------------*/
+
+    	sprintf(gSvrIp,"%s",mid_char(gVer,2,strlen(gVer)-1));
+		EXEC SQL
+			SELECT  DISTINCT
+			        A.CM_SVRIP
+			      , A.CM_PORTNO
+			      , A.CM_SEQNO
+			      , C.CR_RSRCCD
+			      , C.CR_SYSCD
+			      , C.CR_RSRCNAME
+			      , D.CM_DIRPATH
+			  INTO	:gDVServerIP
+			  	  , :dfSendPort
+			  	  , :szSvrSeq
+			  	  , :szRsrcCD
+			  	  , :szSysCD
+			  	  , :gRsrcName
+			  	  , :SvrPath
+			  FROM  CMM0031 A
+			      , CMM0038 B
+			      , CMR0020 C
+			      , CMM0070 D
+			 WHERE  C.CR_ITEMID = :pItemCD
+			   AND  A.CM_SVRCD  = '03'
+			   AND  A.CM_SVRIP  = :gSvrIp
+			   AND  A.CM_CLOSEDT IS NULL
+			   AND  C.CR_SYSCD  = A.CM_SYSCD
+			   AND  C.CR_RSRCCD = B.CM_RSRCCD
+			   AND  A.CM_SYSCD  = B.CM_SYSCD
+			   AND  A.CM_SVRCD  = B.CM_SVRCD
+			   AND  A.CM_SEQNO  = B.CM_SEQNO
+			   AND  C.CR_SYSCD  = D.CM_SYSCD
+			   AND  C.CR_DSNCD  = D.CM_DSNCD;
+
+	    if (sqlca.sqlcode != 0) {
+		    printf("SQLErrCheck 3: Real Server 정보 오류 [%s] 01 [%d] [%s]\n", pItemCD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		    exit (3);
+	    }
+
+	    NotUseDataTruncate(gDVServerIP, 0x20);
+	    NotUseDataTruncate(szRsrcCD   , 0x20);
+	    NotUseDataTruncate(szSysCD    , 0x20);
+	    NotUseDataTruncate(SvrPath    , 0x20);
+        sprintf(gRsrcName, "%s", trunc_char(gRsrcName));
+
+	    ChangeVolPath(szSysCD , "01", szRsrcCD, szSvrSeq, SvrPath, Dev_ProgPath);
+
+	    sprintf(CmdInfo.szJobGub, "G");
+		sprintf(CmdInfo.szServerIP, "%s" , gDVServerIP);
+		CmdInfo.nPort = dfSendPort;
+		sprintf(CmdInfo.szRemote , "%s/%s" , Dev_ProgPath, gRsrcName);
+		sprintf(CmdInfo.szLocal  , "%s" , pLocal);
+	  	Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO(&CmdInfo);
+		
+		if (strcmp(CmdInfo.szRstCond, "0000") != 0) return;
+
+    
+		memset(iconvFileName,0x00,sizeof(iconvFileName));
+		sprintf(iconvFileName,"%s.iconv",pLocal);
+		sprintf(SysCmd,"iconv -f UTF-8 -t eucKR %s > %s ",pLocal,iconvFileName);
+		mRet = system(SysCmd)/256;
+
+		if (mRet == 0) {
+			sprintf(SysCmd,"mv %s %s ",iconvFileName,pLocal);
+			system(SysCmd);
+		}
+		else {
+			remove(iconvFileName);
+		}
+
+		return;
+	}
+	
+	/*-----------------------------------------------------------*/
+	/*   로컬파일을 형상관리에 저장(이클립스에서 저장) 후 비교   */
+    /*-----------------------------------------------------------*/
+	if (strcmp(gVer, "D") == 0) {
+
+		printf("local file name [%s][%s]\n", devFile,pLocal);
+		sprintf(SysCmd,"cp %s %s ",devFile,pLocal);
+		mRet = system(SysCmd)/256;
+		if (mRet == 0) {
+    
+			memset(iconvFileName,0x00,sizeof(iconvFileName));
+			sprintf(iconvFileName,"%s.iconv",pLocal);
+			sprintf(SysCmd,"iconv -f UTF-8 -t eucKR %s > %s ",pLocal,iconvFileName);
+			mRet = system(SysCmd)/256;
+	
+			if (mRet == 0) {
+				sprintf(SysCmd,"mv %s %s ",iconvFileName,pLocal);
+				system(SysCmd);
+			}
+			else {
+				remove(iconvFileName);
+			}
+		}
+		else {
+			remove(pLocal);
+		}
+		
+		return;
+	}
+  	if (strcmp(gVer,"NEW") == 0)
+    	nVersion = nNewVer;
+	else
+		nVersion = atoi(gVer);
+/* 2016.12.09 추가 */
+	if ( cmp_mid_char(pAcptno, 5, 2,"07") == 0 ) {
+		sprintf(SysCmd,"FileRead_cmr0027 %s %s %s",pAcptno, pItemCD, pLocal);
+
+	} else {	
+		sprintf(SysCmd,"FileRead_cmr0025_ver %s %s %d %s",pItemCD,pLocal,nVersion,pAcptno);
+	}
+	
+	system(SysCmd);
+ 
+  if ( strncmp ( szOzRsrc, "02", 2) == 0  || 
+       strncmp ( szOzRsrc, "07", 2) == 0  || 
+       strncmp ( szOzRsrc, "32", 2) == 0 ) {
+
+	  memset(iconvFileName,0x00,sizeof(iconvFileName));
+	  sprintf(iconvFileName,"%s.iconv",pLocal);
+
+/*
+	  sprintf(SysCmd,"iconv -f UTF-8 -t eucKR %s > %s ",pLocal,iconvFileName); 
+*/	  
+	  
+	  sprintf(SysCmd,"iconv -f eucKR -t UTF-8 %s > %s ",pLocal,iconvFileName); 
+
+	  mRet = system(SysCmd)/256;
+    
+	  if (mRet == 0) {
+	  	sprintf(SysCmd,"mv %s %s ",iconvFileName,pLocal);
+	  	system(SysCmd);
+	  }
+	  else {
+    
+	  	remove(iconvFileName);
+	  }
+
+	  
+  }
+
+}
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       File  Compare    처리  M A I N                          */
+/*                                                               */
+/*   Parameter  :                                                */
+/*      1. BackUp Directory                                      */
+/*      2. OLD Sorc Name                                         */
+/*      3. NEW Sorc Name                                         */
+/*      4. UserID                                                */
+/*      5. 개발서버 주소                                         */
+/*      6. 개발서버 파일위치                                     */
+/*****************************************************************/
+int  main(int argc, char **argv, char **envp)
+{
+
+char	DiffFile            [dfFullPath]; /* diff 결과 파일      */
+char	RstOLDFile          [dfFullPath]; /* 변경전파일          */
+char	RstNEWFile          [dfFullPath]; /* 변경후파일          */
+char	DiffSorc1           [dfFullPath]; /* 변경전파일          */
+char	DiffSorc2           [dfFullPath]; /* 변경후파일          */
+char	sysgb	                     [3]; /* 시스템 구분         */
+char	sSysUp                       [3]; /* 시스템 OS 구분      */
+char	sDown                        [3]; /* DOWN 여부           */
+char	tmpDir                   [dfDir];
+char	sAcptNo1              [dfAcptNo];
+char	sAcptNo2              [dfAcptNo];
+
+    if (argc < 8) {
+		printf ("usage : %s <ITEMID1> <BEF_VER> <ITEMID2> <AFT_VER> <OUTFILE> <ACPTNO1> <ACPTNO2> \n", argv[0]);
+        exit (1);
+    }
+
+    memset(SysCmd    , 0x00, sizeof(SysCmd    ));
+    memset(DiffFile  , 0x00, sizeof(DiffFile  ));
+    memset(RstOLDFile, 0x00, sizeof(RstOLDFile));
+    memset(RstNEWFile, 0x00, sizeof(RstNEWFile));
+    memset(DiffSorc1 , 0x00, sizeof(DiffSorc1 ));
+    memset(DiffSorc2 , 0x00, sizeof(DiffSorc2 ));
+    memset(devFile   , 0x00, sizeof(devFile   ));
+    memset(sAcptNo1  , 0x00, sizeof(sAcptNo1  ));
+    memset(sAcptNo2  , 0x00, sizeof(sAcptNo2  ));
+
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+
+    /*-----------------------------------------------------------*/
+    /*   Temp 디렉토리명 조회                                    */
+    /*-----------------------------------------------------------*/
+    SetTempDir("99", tmpDir);
+
+    sprintf(RstOLDFile, "%s/%s.1", tmpDir, argv[5]);
+    sprintf(RstNEWFile, "%s/%s.2", tmpDir, argv[5]);
+
+    /*-----------------------------------------------------------*/
+    /*   로컬파일명 조립                                         */
+    /*-----------------------------------------------------------*/
+	sprintf(DiffSorc1, "%s/%s_old", tmpDir, argv[5]);
+	sprintf(DiffSorc2, "%s/%s_new", tmpDir, argv[5]);
+	sprintf(devFile, "%s/%s", tmpDir, argv[5]);
+	sprintf(DiffFile, "%s/%s", tmpDir, argv[5]);
+
+    /*-----------------------------------------------------------*/
+    /*   버전파일 작성                                           */
+    /*-----------------------------------------------------------*/
+	MakeFileWithVer(argv[1], DiffSorc1 , argv[2], argv[6]);
+	MakeFileWithVer(argv[3], DiffSorc2 , argv[4], argv[7]);
+
+    /*-----------------------------------------------------------*/
+    /*     OLD File VS New File 비교실행                         */
+    /*-----------------------------------------------------------*/
+    sprintf(SysCmd, "diff %s %s > %s", DiffSorc1, DiffSorc2, DiffFile);
+    system(SysCmd);
+
+    /*-----------------------------------------------------------*/
+    /*     OLD File 작성                                         */
+    /*-----------------------------------------------------------*/
+    Make_DiffFile (DiffSorc1, DiffFile, RstOLDFile, 1);
+
+    /*-----------------------------------------------------------*/
+    /*     NEW File 작성                                         */
+    /*-----------------------------------------------------------*/
+	if (Make_DiffFile (DiffSorc2, DiffFile, RstNEWFile, 2) < 0) {
+		remove (DiffFile);
+	    remove (DiffSorc1);
+	    remove (DiffSorc2);
+       exit (1);
+    }
+    remove (DiffFile);
+    remove (DiffSorc1);
+    remove (DiffSorc2);
+    exit (0);
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

@@ -1,0 +1,390 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_acct_sysdb.pc                         │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ CheckIn 처리 공통                            │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 10. 17                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include <ecams_util.h>
+#include <ecamsapi.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	DeclareSyscomRsrcCursor	(char *pAcptNo, char *pPrcSys);
+int 	RunSyscomRsrcScript		(char *pAcptNo, char *pPrcSys, char *pRstCond);
+int 	UploadSyscomRsrc		(char *pAcptNo, char *pPrcSys, char *pRstCond);
+
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+#define DEBUG 	1
+char	gSpoolGB                     [2];
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Process_SYSDB1                                   */
+/*	Action    : SQL(변경전)                                      */
+/*	Parameter :	pAcptNo   : 신청번호                             */
+/*	            pPrcSys   : 처리단계                             */
+/*	            pRstCond  : 처리결과                             */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	Process_SYSDB1	( char *pAcptNo
+						, char *pPrcSys
+						, char *pRstCond
+						)
+{
+int		errRtCode                       ;
+
+
+	sprintf(gSpoolGB, "%s", "1");
+	memset(pRstCond, 0x00, sizeof(pRstCond));
+
+	/*LOG*/sprintf(gszLogMsg,"[%s]<%s>처리시작",pAcptNo,pPrcSys);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	
+	/*-----------------------------------------------------------*/
+	/* 대상 서버에 올라간 자원에 대한 script 실행	  	         */
+	/*-----------------------------------------------------------*/
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] RunSyscomRsrcScript  start",pAcptNo, pPrcSys);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	errRtCode = 0;
+	errRtCode = RunSyscomRsrcScript(pAcptNo,pPrcSys,pRstCond);
+
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] RunSyscomRsrcScript returned [%s][%d]",pAcptNo, pPrcSys,pRstCond,errRtCode);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	if (errRtCode != 0 ) {
+		strcpy(pRstCond, "EROR");
+		return ;
+	}
+
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] 처리완료  [%s]",pAcptNo, pPrcSys,pRstCond);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+}
+/*---------------------------------------------------------------*/
+/*	Function  : Process_SYSDB2                                   */
+/*	Action    : SQL(변경후)                                      */
+/*	Parameter :	pAcptNo   : 신청번호                             */
+/*	            pPrcSys   : 처리단계                             */
+/*	            pRstCond  : 처리결과                             */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	Process_SYSDB2	( char *pAcptNo
+						, char *pPrcSys
+						, char *pRstCond
+						)
+{
+int		errRtCode                       ;
+
+
+	sprintf(gSpoolGB, "%s", "1");
+	memset(pRstCond, 0x00, sizeof(pRstCond));
+
+	/*LOG*/sprintf(gszLogMsg,"[%s]<%s>처리시작",pAcptNo,pPrcSys);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	
+	/*-----------------------------------------------------------*/
+	/* 대상 서버에 올라간 자원에 대한 script 실행	  	         */
+	/*-----------------------------------------------------------*/
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] RunSyscomRsrcScript  start",pAcptNo, pPrcSys);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	errRtCode = 0;
+	errRtCode = RunSyscomRsrcScript(pAcptNo,pPrcSys,pRstCond);
+
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] RunSyscomRsrcScript returned [%s][%d]",pAcptNo, pPrcSys,pRstCond,errRtCode);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	if (errRtCode != 0 ) {
+		strcpy(pRstCond, "EROR");
+		return ;
+	}
+
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] 처리완료  [%s]",pAcptNo, pPrcSys,pRstCond);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+}
+
+/*---------------------------------------------------------------*/
+/*	Function  : RunSyscomRsrcScript                              */
+/*	Action    : 컴파일/배포 목록 작성                            */
+/*	Parameter :	pAcptNo   : 신청번호                             */
+/*	            pPrcSys   : 처리단계                             */
+/*	            pRstCond  : 처리결과                             */
+/*	Return    : 오류건수                                         */
+/*---------------------------------------------------------------*/
+int 	RunSyscomRsrcScript	( char *pAcptNo
+							, char *pPrcSys
+							, char *pRstCond
+							)
+{
+char	szSysCD                [dfSysCD];
+char	szRstPath                [dfDir];
+char	szTmpPath                [dfDir];
+char	szRstFile           [dfFullPath];
+char	szPassFile          [dfFullPath];
+char    szQryString               [2001];
+char    szPrcSys                   [100];
+char    szConnStr                   [51];
+char    szDBUser                    [21];
+char    szDBPass                   [101];
+char    szRstPass                  [101];
+char	gCommand	               [256];          /* 시스템명령 WORK       */
+int		retval                          ;          /* 쿼리결과              */
+int     pSerNo                          ;
+int 	nCnt                            ;
+int		szSysStep                       ;
+FILE  	*DBPtr                          ;          /* 쿼리문 파일작성용 PTR */
+
+
+	memset(szRstFile, 0x00, sizeof(szRstFile));
+	memset(szTmpPath, 0x00, sizeof(szTmpPath));
+
+	/*-----------------------------------------------------------*/
+	/*	파일 생성시 파일이 저장될 경로 설정및 생성               */
+	/*-----------------------------------------------------------*/
+	SetTempDir("22",szRstPath);
+	SetTempDir("99",szTmpPath);
+	strcat(szRstPath,pAcptNo);
+	if (access(szRstPath,F_OK) != 0)
+		Local_Dir_Make(szRstPath);
+	/*-----------------------------------------------------------*/
+	/*	소켓 명령 변수 초기화                                    */
+	/*-----------------------------------------------------------*/
+	
+
+	EXEC SQL DECLARE SYSDB_Rsrc CURSOR FOR
+		SELECT  DISTINCT
+		        B.CR_SYSCD
+		      , A.CR_QRY
+		      , A.CR_PRCSYS
+		      , C.CD_CONNSTR
+		      , C.CD_USERID
+		      , C.CD_PASSWD
+		      , A.CR_SERNO
+		  FROM  CMR1000 B
+		      , CMR1700 A
+		      , CMD1100 C
+		 WHERE  A.CR_ACPTNO = :pAcptNo
+		   AND  NVL(A.CR_SYSSTEP,0) = :szSysStep
+		   AND  A.CR_PRCDATE IS NULL
+		   AND  A.CR_ACPTNO = B.CR_ACPTNO
+		   AND  B.CR_SYSCD = C.CD_SYSCD
+		   AND  A.CR_PRCSYS = C.CD_JOBNAME
+		   AND  (    A.CR_PID IS NULL
+		         OR  NVL(A.CR_PUTCODE,'RTRY') = 'RTRY'
+		        )
+		 ORDER  BY  A.CR_SERNO;
+
+	szSysStep = 0;
+	EXEC SQL open  SYSDB_Rsrc;
+    while (1) {
+		EXEC SQL fetch SYSDB_Rsrc
+			into  :szSysCD
+			    , :szQryString
+			    , :szPrcSys
+			    , :szConnStr
+			    , :szDBUser
+			    , :szDBPass
+			    , :pSerNo;
+
+		if (sqlca.sqlcode == 1403) {
+			sprintf(gszLogMsg,"RunSyscomRsrcScript DB FETCH 1403 : [%s] [%d] [%d] [%s]", pAcptNo, pSerNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"RunSyscomRsrcScript DB FETCH ERROR : [%s] [%d] [%d] [%s]", pAcptNo, pSerNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+
+		NotUseDataTruncate (szSysCD   , 0x20);
+		NotUseDataTruncate (szConnStr , 0x20);
+		NotUseDataTruncate (szDBUser  , 0x20);
+		NotUseDataTruncate (szDBPass  , 0x20);
+
+		sprintf(szQryString, "%s", trunc_char(szQryString));
+		sprintf(szPrcSys , "%s", trunc_char(szPrcSys ));
+
+		sprintf(szPassFile,"%s%s",szTmpPath, pAcptNo);
+		memset(szRstPass , 0x00, sizeof(szRstPass ));
+		
+		retval = desc_PassWord(pAcptNo,pSerNo,szDBPass,szPassFile,szRstPass);
+		if (retval != 0) {
+			strcpy(pRstCond, "EROR");
+			break;
+		}			
+	    NotUseDataTruncate (szRstPass, 0x20);
+	
+		memset(szRstFile, 0x00, sizeof(szRstFile));
+		sprintf(szRstFile, "%s%s.%s.sql", szRstPath, pAcptNo, pSerNo);
+		
+		if (access(szRstFile, F_OK) >= 0) 
+			remove(szRstFile);
+			
+		DBPtr = fopen(szRstFile,"w+");
+		if (DBPtr == NULL)  {
+			/*LOG*/sprintf(gszLogMsg,"[%s] file Open Err [%d][%s]\n", pAcptNo,pSerNo,szRstFile);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			strcpy(pRstCond, "EROR");
+			continue;
+		}
+	
+		fprintf(DBPtr,"set pagesize 100 \n");
+		fprintf(DBPtr,"set linesize 500 \n");
+		if (strcmp(pPrcSys,"SYSDB1") == 0) {
+			fprintf(DBPtr,"spool %s/%s.%d.bef\n", szRstPath, pAcptNo,pSerNo);	
+		} else {
+			fprintf(DBPtr,"spool %s/%s.%d.aft\n", szRstPath, pAcptNo,pSerNo);	
+		}
+		fprintf(DBPtr,"%s\n", szQryString);
+		fprintf(DBPtr,"spool off\n");
+		fprintf(DBPtr,"exit;\n");
+		fclose (DBPtr);
+		
+	    sprintf(gCommand, "sqlplus %s/%s@%s @%s", szDBUser, szRstPass, szConnStr, szRstFile);
+		retval = system (gCommand) / 256;
+		
+		sprintf(pRstCond, "%04d", retval);
+		
+		EXEC SQL
+		   UPDATE CMR1700
+		      SET CR_PUTCODE=:pRstCond
+		      	 ,CR_SYSSTEP=DECODE(:pRstCond,'0000',1,0)
+		    WHERE CR_ACPTNO=:pAcptNo
+		      AND CR_SERNO=:pSerNo;
+		EXEC SQL COMMIT;
+		 
+		remove (szRstFile);
+	}
+    EXEC SQL close SYSDB_Rsrc;
+
+	EXEC SQL
+	   UPDATE CMR1700
+	      SET CR_PUTCODE='EROR'
+	    WHERE CR_ACPTNO=:pAcptNo
+	      AND CR_PRCDATE IS NULL
+	      AND CR_PUTCODE IS NULL;
+	EXEC SQL COMMIT;
+	nCnt = 0;
+
+	/*-----------------------------------------------------------*/
+	/*	처리결과 오류건수 조회                                   */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  COUNT(CR_SERNO)
+		  INTO  :nCnt
+		  FROM  CMR1700 
+		 WHERE  CR_ACPTNO  = :pAcptNo
+		   AND  CR_PRCDATE IS NULL
+		   AND  CR_STATUS != '3'
+		   AND  NVL(CR_PUTCODE,'NA') != '0000';
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg,"ERROR Count Err!!! : [%s] [%d] [%s]", pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		strcpy(pRstCond,"EROR");
+		return sqlca.sqlcode;
+	}
+	
+	if (nCnt != 0) {
+		strcpy(pRstCond,"EROR");
+		return nCnt;
+	}
+	strcpy(pRstCond, "0000");
+
+	
+	return nCnt;
+}
+/*-------------------------------------------------------------------*/
+/*   비밀번호 복호화                                                 */
+/*-------------------------------------------------------------------*/
+int desc_PassWord(char *pAcptNo  
+				 , char *pSerNo
+			     , char *passWd
+			     , char *retFile
+			     , char *retPass){
+	char	gCommand	    [256];          /* 시스템명령 WORK       */
+	int		retval               ;          /* 쿼리결과              */
+	char	*dummy               ;          /* Read Buffer           */
+	FILE    * SrcPtr;
+	long	nFileSize              ;
+	
+	if (access(retFile, F_OK) >= 0) 
+		remove(retFile);
+		
+	sprintf(gCommand, "java Encryptor_Call D %s %s", passWd, retFile);
+	retval = system (gCommand) / 256;
+	if (retval != 0) {		
+		 /*LOG*/sprintf(gszLogMsg,"[%s] PASSWORD Decryption CALL ERROR [%d][%s]\n", pAcptNo,pSerNo,gCommand);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return (1);
+	}
+	if (access(retFile, F_OK) < 0) {		
+		 /*LOG*/sprintf(gszLogMsg,"[%s] PASSWORD Decryption CALL ERROR [%d][%s][%s]\n", pAcptNo,pSerNo,gCommand,retFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return (2);
+	}
+	if ((SrcPtr = fopen(retFile, "r")) == (FILE *) NULL) {
+		/*LOG*/sprintf(gszLogMsg,"[%s] PASSWORD Decryption Result File Open Error [%d][%s]\n", pAcptNo,pSerNo,retFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return (3);
+	}
+	
+	nFileSize = FileSizeInf(retFile) + 1;
+	dummy = (char *)malloc(nFileSize);
+	memset(dummy, 0x00, nFileSize);
+	
+	while (fgets(dummy, nFileSize, SrcPtr) != (char *) NULL) {
+		sprintf(dummy,"%s", rep_char(dummy,"\n",""));
+		sprintf(dummy,"%s", rep_char(dummy,"\r\n",""));
+		sprintf(dummy,"%s", trunc_char(dummy));
+		
+		if (strlen(dummy) < 2) {
+			/*LOG*/sprintf(gszLogMsg,"[%s] PASSWORD Decryption Result File Error [%d][%s]\n", pAcptNo,pSerNo,retFile);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			free(dummy);
+			fclose (SrcPtr);
+			return (3);
+		}
+		if (cmp_left_char(dummy,2,"OK") != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[%s] PASSWORD Decryption Result Error [%d][%s][%s]\n", pAcptNo,pSerNo,retFile,dummy);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			free(dummy);
+			fclose (SrcPtr);
+			return (3);
+		}	
+		sprintf(retPass,"%s",mid_char(dummy,3,strlen(dummy) - 2));
+		break;
+		
+	}
+	free(dummy);
+	fclose (SrcPtr);
+	remove(retFile);
+	return(0);	
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

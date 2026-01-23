@@ -1,0 +1,217 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_acct_sysanl.pc                         │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 영향분석 파일전송 단계 처리 프로그램         │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+int  	Process_SYSANL	(char *pAcptNo, char *pPrcSys , char *pRstCond);
+void	wait_bgJob(char *pAcptNo);
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+#define DEBUG 1
+char	gSpoolGB                     [2];
+
+
+
+
+
+/*---------------------------------------------------------------*/
+/*	FUNCTION  : SYSUP  처리 main                                 */
+/*	PARAMETER : pAcptNo  : 신청번호                              */
+/*              pSysCD   : 처리시스템                            */
+/*              pRstCond : 처리결과                              */
+/*	RETURN    : 없슴                                             */
+/*---------------------------------------------------------------*/
+int Process_SYSANL (char *pAcptNo,  char *pPrcSys , char *pRstCond)
+{
+char	szSysCD           [6];		   /* 시스템코드             */
+int		szSerNo;
+char	szRsrcCD          [5];		   /* 자원구분               */
+char	szDsnCD          [10];		   /* 자원위치코드           */
+char	szRsrcName       [512];         /* 자원명                 */
+
+char	szEditor[512];
+char	szUserName[512];
+
+char	szCommand[512];
+
+int		szSysStep;
+
+int		nErrCnt;
+int		nRet;
+
+char	szPrjNo[14];
+char	szPrjNm[512];
+char	szReqSayu[512];
+char	szPlanDay[9];
+
+	
+	
+	szSysStep = 0;
+
+	/*----------------------------------------------------------------------------*/
+	/* 영향분석 인터페이스를 위한 대상 추출                                       */
+	/*----------------------------------------------------------------------------*/
+	EXEC SQL  declare SYSANL_RSRC0 cursor for
+	   SELECT   distinct
+	   			a.cr_syscd,
+	   			a.cr_serno,
+	   			a.cr_dsncd,
+	   			a.cr_rsrccd,
+	   			a.cr_rsrcname,
+	   			d.cr_editor,
+	   			to_char(d.cr_acptdate,'yyyymmdd'),
+	   			e.cm_username,
+	   			d.cr_itsmid,
+	   			d.cr_itsmtitle,
+	   			d.cr_passcd
+         FROM    CMR1010 a, CMM0036 c, cmr1000 d, cmm0040 e
+        WHERE   a.CR_AcptNo   = :pAcptNo  
+        and		a.cr_prcdate is null
+		and 	a.cr_syscd	  = c.cm_syscd
+		and 	a.cr_rsrccd	  = c.cm_rsrccd
+		and		substr(c.cm_info,34,1) = '1'
+		and		a.cr_acptno   = d.cr_acptno
+		and 	d.cr_editor	  = e.cm_userid;
+		  
+	EXEC SQL open  SYSANL_RSRC0;
+
+    while (1) 
+	{
+		EXEC SQL fetch SYSANL_RSRC0 into  :szSysCD, :szSerNo, :szDsnCD, :szRsrcCD, :szRsrcName, :szEditor,
+										  :szPlanDay, :szUserName, :szPrjNo, :szPrjNm, :szReqSayu;
+										  			
+		if (sqlca.sqlcode == 1403)	break;		
+
+		NotUseDataTruncate (szSysCD     , 0x20);
+		NotUseDataTruncate (szRsrcCD    , 0x20);
+		NotUseDataTruncate (szDsnCD     , 0x20);
+		NotUseDataTruncate (szEditor   , 0x20);
+		NotUseDataTruncate (szUserName, 0x20);
+		NotUseDataTruncate (szPrjNo, 0x20);
+		NotUseDataTruncate (szPlanDay, 0x20);
+		sprintf(szPrjNm,"%s", trunc_char(szPrjNm));
+		sprintf(szReqSayu,"%s", trunc_char(szReqSayu));
+		sprintf(szRsrcName,"%s", trunc_char(szRsrcName));
+				
+		while (1) {
+			nRet = 0;
+			sprintf (szCommand, "procck2 ecams_prcanal %s",pAcptNo);
+			nRet = system(szCommand) / 256;	
+
+			if (nRet < 10) break;
+
+			sleep(3);
+		}
+		
+		
+		sprintf(szCommand,"ecams_prcanal '%s' '%s' '%d' '%s' '%s' '%s' '%s' '%s' '%s' 1 '%s' '%s' '%s' '%s' &"
+						 , "SYSANL", pAcptNo, szSerNo, szSysCD, szDsnCD, szRsrcCD, szRsrcName, szEditor, szUserName, szPrjNo, szPrjNm, szPlanDay, szReqSayu);
+						 
+
+		/*LOG*/sprintf(gszLogMsg,"[%s][%d] ecams_prcanal- Command[%s]", pAcptNo,szSerNo,szCommand);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		system(szCommand);
+		
+	}
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+    EXEC SQL CLOSE SYSANL_RSRC0;
+	
+	wait_bgJob(pAcptNo);
+	
+	
+	nErrCnt = 0;
+    
+    
+	EXEC SQL
+		Select  COUNT(a.cr_seqno)
+		Into  :nErrCnt
+		From  CMR1011 a, CMR1010 b
+		Where  a.CR_AcptNo = :pAcptNo
+		AND	 b.cr_prcdate is null
+		AND	 a.cr_acptno = b.cr_acptno
+		and  a.cr_serno = b.cr_serno
+		and  b.cr_status <> '3'
+		AND  a.CR_PRCSYS = 'SYSANL'
+		AND  a.CR_RUNGBN = 'B'
+		And  NVL(a.CR_PutCode,'NA') != '0000';	
+		
+	
+	EXEC SQL
+		UPDATE CMR1010
+		SET CR_SYSSTEP = DECODE(NVL(CR_PUTCODE,'0000'),'0000',1,0),
+			CR_PUTCODE = DECODE(NVL(CR_PUTCODE,'0000'),'0000','',CR_PUTCODE),
+			CR_SRCCMP = DECODE(NVL(CR_PUTCODE,'0000'),'0000','Y',CR_SRCCMP)
+		WHERE CR_ACPTNO = :pAcptNo
+		AND	 CR_PRCDATE IS NULL
+		AND  NVL(CR_SYSSTEP,0) <= 0;
+
+
+	if(sqlca.sqlcode != 0 && sqlca.sqlcode != 1403){
+		sprintf(gszLogMsg,"Step Update Err!!! : [%s] [%d] [%s]"
+						  ,pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		strcpy(pRstCond,"EROR");
+		return sqlca.sqlcode;
+	}
+	
+	EXEC SQL COMMIT;
+
+
+	/*LOG*/sprintf(gszLogMsg,"[%s]SYSANL =============nErrCnt=[%d] 1",pAcptNo,nErrCnt);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			
+	if(nErrCnt != 0)      /* 컴파일 자원 UPLOAD 오류가 없다면 */
+	{
+		strcpy(pRstCond,"EROR");
+		return nErrCnt;
+	}    
+		
+	strcpy(pRstCond,"0000");
+	return 0;
+
+
+
+}
+
+
+void	wait_bgJob(char *pAcptNo){
+	char    SysCmd  [512];
+	int		retval       ;
+
+	retval = -1;
+	
+	do{
+		sprintf (SysCmd, "ps -ef | grep ecams_prcanal | grep '%s' | grep -v grep", pAcptNo);
+		retval = system (SysCmd) / 256;
+		sleep(3);
+	}while(retval == 0);
+	
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

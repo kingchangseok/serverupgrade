@@ -1,0 +1,252 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_ckout.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 형상관리(eCAMS) 자원 파일로 작성 후 개발서버로 전송             │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2013. 09. 03                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include    <ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+  char	   gConnStr                 [50]; /* Connect String      */
+  char     gServerIP           [dfSvrIP]; /* Server IP Address   */
+  char     gDVServerIP         [dfSvrIP]; /* Server IP : TEST    */
+  char     gCSServerIP         [dfSvrIP]; /* Server IP : 적용    */
+  char     gChkSvrIP           [dfSvrIP]; /* Server IP Address   */
+  char     SV_RstCond        [dfRstCode]; /* 처리 결과           */
+  char     gLogMsg                [1024]; /* Logging Message Work*/
+  char     gLogAcptNo         [dfAcptNo]; /* eCAMS Log 접수번호  */
+  char     gLogFile         [dfFullPath]; /* eCAMS Logging File  */
+  int      gErrNo                       ;
+EXEC SQL END DECLARE SECTION;
+
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+int      cSockId    ;                 /* Connect Socket ID       */
+int  	 gRcvFd     ;                 /* 수신용 File Pointer     */
+int  	 gSndFd     ;                 /* 송신용 File Pointer     */
+int  	 gProcStep  ;                 /* 송신/수신 상태          */
+int  	 gProcWork  ;                 /* 송신/수신 여부          */
+int  	 gFileOffset;                 /* 파일 송신 OffSet        */
+char     systime  [16], sysdate [16]; /* 시스템일자, 시간        */
+
+
+int     nRet1          ;              /* Char Find Work          */
+int     CurrCnt        ;              /* Source Line Count       */
+
+time_t       time_clock;
+
+/*---------------------------------------------------------------*/
+/*   eCAMS  LOGGING 관련  CONSTANT                               */
+/*---------------------------------------------------------------*/
+FILE   *fd;                           /* Logging File Pointer    */
+struct stat  f_st;                    /* Logging File Struct     */
+struct tm   *loc;                     /* File 정보 Read Pointer  */
+
+char   LogTemp         [256];         /* Logging Message         */
+char   ERRMsg          [160];         /* Error Message           */
+
+extern    int    errno;               /* 시스템 오류코드         */
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       Generate Source  처리  M A I N                          */
+/*                                                               */
+/*   Parameter  :                                                */
+/*      1. 시스템구분                                            */
+/*      2. 자원구분                                              */
+/*      3. DsnCD                                                 */
+/*      4. 자원이름                                              */
+/*      5. 자원버젼                                              */
+/*      6. 요청자아이디                                          */
+/*****************************************************************/
+int 	main (int argc, char **argv, char **envp)
+{
+char	GenFile             [dfFullPath];
+char	szSysGbn                    [5];
+char	szItemID              [dfItemID];
+char	szOutFileName       [dfFullPath];
+char	szOutFullName       [dfFullPath];
+char	szAcptNo              [dfAcptNo];
+int		nVer                            ;
+char	tmpDir                   [dfDir];
+char	szCommand           [dfFullPath];
+int		nRet                            ;
+char	iconvFileName       [dfFullPath];
+char	szRsrcName          [dfRsrcName];
+char	szRsrcCD              [dfRsrcCD];
+char	szJobCD                [dfJobCD];
+char	gDVServerIP            [dfSvrIP];
+char	szDirPath           [dfFullPath];
+char	szChangDirPath      [dfFullPath];
+char	szHomePath          [dfFullPath];
+char	Dev_ProgPath            [dfDir] ;
+char	szSysCD                [dfSysCD];
+char	szRemoteFileName    [dfFullPath];
+char	szLocalFileName     [dfFullPath];
+char	szRemote            [dfFullPath];
+char	szLocal             [dfFullPath];
+int 	dfSendPort                      ;
+int		szSvrSeq                        ;
+int		chkUncomp                       ;
+int		rc                              ;
+
+CMD_INFO	  CmdInfo;
+
+
+    if (argc < 3) {
+		printf ("Usage : %s <SYSGBN> <FULLPATH>\n", argv[0]);
+        exit (1);
+    }
+    	
+    memset(GenFile      , 0x00, sizeof(GenFile       ));
+    memset(szSysGbn     , 0x00, sizeof(szSysGbn      ));
+
+	strcpy(szSysGbn      , argv[1]);
+	strcpy(GenFile       , argv[2]);
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+    NotUseDataTruncate(gDVServerIP, 0x20);      
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", tmpDir);
+	NotUseDataTruncate(tmpDir, 0x20);
+
+	memset(szCommand, 0x00, sizeof(szCommand));
+
+	/*-----------------------------------------------------------*/
+	/*	소켓 명령 변수 초기화                                    */
+	/*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+    
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");
+	
+	memset(szCommand, 0x00, sizeof(szCommand));
+	nRet = Char_Check(GenFile,"/modules");
+	if (nRet < 0) {
+		printf("Directory Fail [%s]\n",GenFile);
+		sprintf(gszLogMsg,"[ecams_ckout] [%s] 에 대한 체크아웃처리에 실패하였습니다. [디렉토리오류 1]",GenFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);	
+	}	
+	sprintf(Dev_ProgPath,"%s",mid_char(GenFile,nRet+1,strlen(GenFile)-nRet));
+	sprintf(szHomePath,"%s",left_char(GenFile,nRet));
+	printf("Dev_ProgPath [%s][%s] \n",szHomePath,Dev_ProgPath);
+	if (strcmp(szSysGbn,"KJ") == 0) strcpy(szSysCD,"01000");
+	else strcpy(szSysCD,"02000");
+	
+	EXEC SQL
+	   SELECT LPAD(REQID_ETC_SEQ.NEXTVAL,12,'0')
+	     INTO :szAcptNo
+	     FROM DUAL;
+	NotUseDataTruncate (szAcptNo   ,   0x20);   
+	  
+	EXEC SQL declare ECLIPSE_CKOUT cursor for
+		SELECT B.CM_SVRIP,
+			   B.CM_PORTNO,
+			   C.CM_DIRPATH,
+			   A.CR_ITEMID,
+			   A.CR_LSTVER,
+			   A.CR_RSRCNAME
+		  FROM CMM0070 C,CMM0031 B,CMM0038 D,CMR0020 A
+		 WHERE C.CM_SYSCD=:szSysCD
+		   AND SUBSTR(C.CM_DIRPATH,14,LENGTH(:Dev_ProgPath))= :Dev_ProgPath
+		   AND C.CM_SYSCD=A.CR_SYSCD
+		   AND C.CM_DSNCD=A.CR_DSNCD
+		   AND A.CR_LSTVER>0
+		   AND A.CR_STATUS<>'9'
+		   AND B.CM_SYSCD=:szSysCD
+		   AND B.CM_SVRCD='04'
+		   AND NVL(B.CM_CMPSVR,'N')='Y'
+		   AND B.CM_CLOSEDT IS NULL
+		   AND B.CM_SYSCD=D.CM_SYSCD
+		   AND B.CM_SVRCD=D.CM_SVRCD
+		   AND B.CM_SEQNO=D.CM_SEQNO
+		   AND A.CR_RSRCCD=D.CM_RSRCCD;
+	
+	EXEC SQL open  ECLIPSE_CKOUT;
+	while(1){
+		EXEC SQL fetch ECLIPSE_CKOUT into :gDVServerIP,:dfSendPort,:szDirPath,:szItemID, :nVer, :szRsrcName;
+		
+		if (sqlca.sqlcode == 1403){
+			sprintf(gszLogMsg,"[ecams_ckout] ECLIPSE_CKOUT DB FETCH BREAK : [%d] [%s] [%s]"
+							  ,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc,GenFile);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);			
+			break;
+		}
+
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"[ecams_ckout] ECLIPSE_CKOUT DB FETCH ERROR :  [%d] [%s] [%s]"
+							  ,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc,GenFile);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+		
+				
+		NotUseDataTruncate (gDVServerIP,   0x20);
+		NotUseDataTruncate (szDirPath  ,   0x20);
+		NotUseDataTruncate (szItemID   ,   0x20);	
+	    sprintf(szRsrcName, "%s", trunc_char(szRsrcName));
+	    
+	    strcpy(szRemoteFileName,szRsrcName);
+		sprintf(szLocalFileName,"%s.%s",szRsrcName,szItemID);
+		sprintf(szLocal,"%s/%s",tmpDir,szLocalFileName);		
+	    sprintf(szChangDirPath,"%s/%s",szHomePath,right_char(szDirPath,strlen(szDirPath) - 14));
+		sprintf(szRemote,"%s/%s",szChangDirPath,szRemoteFileName);		
+	    do {
+	  		nRet = system("ps -ef | grep ecams_ckout_sub | grep -v grep >/dev/null") /256;
+	  	} while(nRet >= 10);
+	  	
+		sprintf(szCommand,"ecams_ckout_sub %s %s \"%s\" \"%s\" %d %s %d &", szAcptNo,szItemID,szLocal,szRemote,nVer,gDVServerIP,dfSendPort);
+		nRet = system(szCommand);
+	}
+	EXEC SQL close ECLIPSE_CKOUT;
+	
+	while (1) {
+		sprintf (szCommand, "ps -ef | grep \"ecams_ckout_sub %s\" | grep -v grep", szAcptNo);
+		nRet = system (szCommand) / 256;
+		if (nRet != 0)	break;
+		sleep(1);
+	}
+	
+    exit (0);
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

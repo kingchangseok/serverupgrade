@@ -1,0 +1,351 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_fileinit.pc                               │
+ ├──────┼───────────────────────┤
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2013. 04. 15                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE SQLCA;
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+char gszLogFile[50];	/*Log File Name*/
+char gszLogPath[100];	/*Log File Path*/
+char gszLogMsg[512];	/*Log Message  */
+char gszTempPath[100];	/*Temp Direcotry*/
+
+int		main (int argc, char **argv, char **envp)
+{
+	char	szAcptNo[21];
+	char	szSysCD[6];
+	char	szRsrcCD[3];
+	char	szDsnCD[8];
+	char    szJobCD[10];
+	char	szRsrcName[512];
+	int		szSerNo;
+	char	szBaseNo[21];
+	char	szReqCD[3];
+	char	szSysGB[2];
+	char	szEditor[512];
+	char	szItemId[13];
+	char    pSysCD[6];
+	char    szBaseDir[512];
+	char    szSecDir [512];
+	char    pDirPath[512];
+	char    szBefDsn[8];
+	char    szItemID       [13];
+	char    szAgentDir    [512];
+	
+	char	szCommand[5000];
+	char    szDirPath[512];
+	char    szAftPath[512];
+	char	szGbnCd[10];
+	char    szSvrIP[20];
+	char    szDate[9];
+	int     nPort;
+	
+	int		nRet;
+	int		ncnt;
+	int     nLastVer;
+	int     nSvrSeq;
+	char	QryStr   [5000];
+	char    szChangDirPath   [512];
+	char    szFileList       [512];
+	char    szFileList1      [512];
+	char    szTempFile       [512];
+	
+	CMD_INFO	CmdInfo; 
+	char    dummy                    [16384];
+	char	*szKeys[5]             ;
+	int		Index_key=0            ;
+	char	*toktmp                ;
+	FILE *SrcPtr;
+	
+	
+	if (argc < 4) {
+        printf ("Usage : %s <syscd> <ipaddr> <port> <homedir>  \n", argv[0]);
+        exit (0);
+    }
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");	
+
+
+	memset(szSysCD    , 0x00, sizeof(szSysCD   ));
+	memset(szSvrIP    , 0x00, sizeof(szSvrIP   ));
+	memset(szBaseDir  , 0x00, sizeof(szBaseDir ));
+     
+	sprintf(szSysCD   , "%s", argv[1]); 
+	sprintf(szSvrIP   , "%s", argv[2]); 
+	nPort = atoi(argv[3]); 
+	sprintf(szBaseDir , "%s", argv[4]); 
+	NotUseDataTruncate (szSysCD     , 0x20);
+	NotUseDataTruncate (szSvrIP     , 0x20);
+	NotUseDataTruncate (szBaseDir   , 0x20);
+	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE){
+		/*LOG*/sprintf(gszLogMsg,"FileInit DB Connect Error\n");
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}	
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", gszTempPath);
+	
+	/*LOG*/sprintf(gszLogMsg,"[%s] ecams_fileinit 처리 시작 [%s] [%d][%s][%s]",szSysCD,szSvrIP,nPort,szBaseDir,gszTempPath);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	
+	InitCmdInfo(&CmdInfo);
+	
+	EXEC SQL
+	   SELECT A.CM_DIR
+	     INTO :szAgentDir
+	     FROM CMM0031 A
+	    WHERE A.CM_SYSCD=:szSysCD
+	      AND A.CM_SVRCD='04'
+	      AND A.CM_SVRIP=:szSvrIP
+	      AND A.CM_PORTNO=:nPort
+	      AND A.CM_CLOSEDT IS NULL;
+		
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] select CMM0031 error [%d] [%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit(1);			
+	}   
+	NotUseDataTruncate (szAgentDir   , 0x20);
+	
+	sprintf(szFileList,"%s_%s.filelist",szSysCD,szSvrIP);      
+	CmdInfo.nPort = nPort;
+	strcpy(CmdInfo.szServerIP, szSvrIP);
+	strcpy(CmdInfo.szJobGub,"S");
+	sprintf(CmdInfo.szCommand,"ls -AFR \"%s\" | grep / > %s/%s", szBaseDir, szAgentDir, szFileList);
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] FileList select error [%s] [%s]\n",CmdInfo.szCommand,CmdInfo.szRstCond);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit(1);
+	}	
+    sprintf(szFileList1, "%s/%s", gszTempPath,szFileList);
+
+	/*-----------------------------------------------------------*/
+	/* 	생성 파일 GET                                            */
+	/*-----------------------------------------------------------*/
+	strcpy(CmdInfo.szJobGub,"G");
+	sprintf(CmdInfo.szLocal,"%s",szFileList1);
+	sprintf(CmdInfo.szCommand, "%s", "");
+	sprintf(CmdInfo.szRemote,"%s/%s", szAgentDir, szFileList);
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] FileList get error [%s] [%s] [%s]\n",CmdInfo.szLocal,CmdInfo.szRemote,CmdInfo.szRstCond);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit(1);
+	}
+    
+	/*-----------------------------------------------------------*/
+	/* 	서버에 생성 파일 삭제                                    */
+	/*-----------------------------------------------------------*/
+	fprintf(stdout, "서버에 생성 파일 삭제...\n");
+	strcpy(CmdInfo.szJobGub,"S");
+	sprintf(CmdInfo.szCommand,"rm -rf %s/%s",szAgentDir, szFileList);
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	
+	/*-----------------------------------------------------------*/
+	/*	ls -lR 실행시 지정 디렉토리는 출력이 않되므로 추가 시켜  */
+	/*	줘야 함                                                  */
+	/*-----------------------------------------------------------*/
+	sprintf(szTempFile,"%s.tmp",szFileList1);
+	FILE * fp;
+	if ((fp = fopen(szTempFile,"w")) == NULL) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] 임시파일생성 실패 [%s] \n",szTempFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit(1);
+	}
+
+	fprintf(fp,"%s:\n",szBaseDir);
+	fclose(fp);
+
+	sprintf(szCommand,"cat %s >> %s",szFileList1, szTempFile);
+	printf("%s\n",szCommand);
+	nRet = system(szCommand);
+	if (nRet != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] 경로추가 실패 [%s] [%s]\n",szTempFile,szCommand);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit(1);
+	}
+	else {
+	    sprintf(szCommand,"mv %s %s", szTempFile,szFileList1);
+	    nRet = system(szCommand);
+    }
+    remove(szTempFile);
+    
+    if ((SrcPtr = fopen(szFileList1, "r")) == (FILE *) NULL) {
+    	/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] result file open fail [%s] [%s]\n",
+			   szSysCD,szFileList1);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+    while (fgets(dummy, 16384, SrcPtr) != (char *) NULL) {
+		sprintf(dummy, "%s",rep_char(dummy,"\n"  , ""));
+		sprintf(dummy, "%s",rep_char(dummy,"\r\n", ""));
+		sprintf(dummy, "%s",trunc_char(dummy));
+	    
+	    if (strlen(dummy) < 1) continue;	
+		if (cmp_left_char(dummy,1,"/") != 0) continue;
+		sprintf(pDirPath,"%s",rep_char(dummy,":",""));
+		if (strlen(pDirPath)<65) continue;
+		nRet=Right_Char_Check(pDirPath, '/' );
+		if (nRet > 0) {
+			sprintf(szRsrcName,"%s.cmethod",right_char(pDirPath,strlen(pDirPath)-nRet));
+		} else continue;
+		/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] Directory select [%s] [%s][%s]\n",
+			   szSysCD,pDirPath,szRsrcName);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);			
+		EXEC SQL
+		   	SELECT A.CR_ITEMID,A.CR_JOBCD,A.CR_DSNCD,B.CM_DIRPATH
+		   	  INTO :szItemID,:szJobCD,:szBefDsn,:szDirPath
+		   	  FROM CMM0070 B,CMR0020 A
+		   	 WHERE A.CR_SYSCD    = :szSysCD
+		   	   AND A.CR_RSRCNAME = :szRsrcName
+		   	   AND A.CR_SYSCD    = B.CM_SYSCD
+		   	   AND A.CR_DSNCD    = B.CM_DSNCD;
+		if (sqlca.sqlcode == 1403) continue;
+		
+		if (sqlca.sqlcode != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] CMR0020 select 실패 [%s] [%s] [%s][%d][%s]\n",
+			    szSysCD,szRsrcName,pDirPath,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+			continue;
+		}
+		NotUseDataTruncate (szItemID, 0x20);
+		NotUseDataTruncate (szJobCD,  0x20);
+		NotUseDataTruncate (szBefDsn, 0x20);
+		NotUseDataTruncate (szDirPath,0x20);
+		nRet = Char_Check(pDirPath,"/modules");
+		sprintf(szSecDir,"%s",right_char(pDirPath,strlen(pDirPath)-(nRet+1)));
+		sprintf(szAftPath,"/ecams/%s",right_char(szJobCD,2));
+		sprintf(szAftPath,"%s/%s/%s",szAftPath,left_char(szJobCD,3),szSecDir);
+		/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] Directory Check [%s] [%s] [%s][%s][%s][%s][%s]\n",
+			   szSysCD,szRsrcName,szJobCD,szDirPath,pDirPath,szSecDir,szAftPath);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		if (strcmp(szDirPath,szAftPath) != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] Directory Change [%s] [%s] [%s][%s]\n",
+			   szSysCD,szRsrcName,szDirPath,szAftPath);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+			EXEC SQL
+			   SELECT CM_DSNCD
+			     INTO :szDsnCD
+			     FROM CMM0070
+			    WHERE CM_SYSCD=:szSysCD
+			      AND CM_DIRPATH=:szAftPath;
+			if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+				/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] CMM0070 select 실패 [%s] [%s] [%d][%s]\n",
+				   szSysCD,szAftPath,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+				continue;
+			} 
+			if (sqlca.sqlcode == 1403) {
+				EXEC SQL
+				   INSERT INTO CMM0070
+				       (CM_SYSCD,CM_DSNCD,CM_DIRPATH,CM_EDITOR,CM_OPENDT,CM_LASTUPDT,CM_RUNSTA)
+				       (SELECT :szSysCD,LPAD(MAX(CM_DSNCD)+1,7,'0'),:szAftPath,'MASTER',SYSDATE,SYSDATE,'0'
+				          FROM CMM0070
+				         WHERE CM_SYSCD=:szSysCD);
+				if (sqlca.sqlcode != 0) {
+					/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] CMM0070 INSERT 실패 [%s] [%s] [%d][%s]\n",
+					    szSysCD,szAftPath,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+					continue;
+				}
+				EXEC SQL COMMIT;
+				 
+				EXEC SQL
+				   SELECT CM_DSNCD
+				     INTO :szDsnCD
+				     FROM CMM0070
+				    WHERE CM_SYSCD=:szSysCD
+				      AND CM_DIRPATH=:szAftPath;
+				if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+					/*LOG*/sprintf(gszLogMsg,"[ecams_fileinit] CMM0070 select 실패 2 [%s] [%s] [%d][%s]\n",
+					   szSysCD,szAftPath,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+					continue;
+				} 
+			}
+			/*
+			EXEC SQL
+			   UPDATE CMR0020
+			      SET CR_DSNCD=:szDsnCD
+			    WHERE CR_SYSCD=:szSysCD
+			      AND CR_DSNCD=:szBefDsn;
+			
+			EXEC SQL
+			   UPDATE CMR1010
+			      SET CR_DSNCD=:szDsnCD
+			    WHERE CR_SYSCD=:szSysCD
+			      AND CR_DSNCD=:szBefDsn;
+			      	
+			EXEC SQL
+			   UPDATE CMR0028
+			      SET CR_DSNCD=:szDsnCD
+			    WHERE CR_SYSCD=:szSysCD
+			      AND CR_DSNCD=:szBefDsn;
+		    EXEC SQL COMMIT;
+			*/
+		}
+	}
+	fclose (SrcPtr);
+    exit (0);
+		
+}
+/*
+select a.cr_rsrcname from cmr0020 a,cmm0070 b 
+ where a.cr_syscd in ('01000','02000') 
+   and a.cr_syscd=b.cm_syscd and a.cr_dsncd=b.cm_dsncd
+   and length(b.cm_dirpath)>38
+   and a.cr_lstver>0
+   and a.cr_status<>'9'
+   and a.cr_rsrcname like '%.cmethod'
+  group by a.cr_rsrcname
+  having count(*)>1
+  */
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

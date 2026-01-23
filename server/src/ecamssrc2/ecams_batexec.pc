@@ -1,0 +1,105 @@
+
+/*-----------------------------------------------------------------
+ ¦£¦¡¦¡¦¡¦¡¦¡¦¡¦¨¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¤
+ ¦¢ ÇÁ·α׷¥¸í ¦¢ ecams_batexec.pc                                 ¦¢
+ ¦§¦¡¦¡¦¡¦¡¦¡¦¡¦«¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦©
+ ¦¢ ±â      ´É ¦¢ eCAMS Batch excute (ap°èÁ¤)                              ¦¢
+ ¦§¦¡¦¡¦¡¦¡¦¡¦¡¦«¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦©
+ ¦¢ ÀÛ  ¼º  ÀÏ ¦¢ 2013. 04. 05                                 ¦¢
+ ¦§¦¡¦¡¦¡¦¡¦¡¦¡¦«¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦©
+ ¦¢ ÀÛ  ¼º  ÀÚ ¦¢ ÃÖ   ÀÎ   ¼÷                                 ¦¢
+ ¦¦¦¡¦¡¦¡¦¡¦¡¦¡¦ª¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¥
+-----------------------------------------------------------------*/
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+/*---------------------------------------------------------------*/
+/*		Àü¿ªº¯¼ö 			                                     */
+/*---------------------------------------------------------------*/
+
+/*****************************************************************/
+/*                                                               */
+/*       eCAMS_SVNMGR  ó¸® MAIN  LOGIC                          */
+/*                                                               */
+/*****************************************************************/
+int		main(int argc, char **argv, char **envp)
+{
+	char	szCommand[512];
+	char    szSvrIp   [30];
+	int     nRet = 0;
+	int		nPort                           ;
+	CMD_INFO CmdInfo;
+    
+    
+	if (argc < 1){
+		fprintf (stderr, "USAGE : %s <command> \n", argv[0]);
+		exit(1);
+	}
+
+    Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));
+	
+	memset(szCommand    , 0x00, sizeof(szCommand    ));	
+	strcpy(szCommand,argv[1]);
+	sprintf(szCommand,"%s",rtrunc_char(szCommand));
+	
+	/*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		/*LOG*/sprintf(gszLogMsg,"ecams_batexec DB Connect Error\n");
+	  	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+    /*-----------------------------------------------------------*/
+    /*  SVN¼­¹ö·Î ±ÇÇÑÁ¤º¸ Àü¼ۿ©ºÎ Check                        */
+    /*-----------------------------------------------------------*/
+    EXEC SQL
+         SELECT cm_ipaddr,cm_port
+           INTO :szSvrIp,:nPort
+           FROM CMM0010
+          WHERE CM_STNO='ECAMS';
+    if (sqlca.sqlcode != 0) {
+        if (sqlca.sqlcode != 1403) {
+			sprintf(gszLogMsg,"ecams_batexec cmm0010 select Err [%d][%s]"
+						,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			exit(1);
+		}
+	}
+
+	NotUseDataTruncate (szSvrIp,0x20);
+	EXEC SQL COMMIT WORK RELEASE;
+	
+	/*-----------------------------------------------------------*/
+	/* ¼ÒÄÏ ¸í·É º¯¼ö Ãʱâȭ                                     */
+	/*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+	
+	sprintf(CmdInfo.szServerIP, "%s", szSvrIp);
+	CmdInfo.nPort = nPort;
+	sprintf(CmdInfo.szJobGub, "S");
+	sprintf(CmdInfo.szCommand, "%s",szCommand);
+	
+	Server_Cmd_JOB(&CmdInfo);
+
+	if (memcmp(CmdInfo.szRstCond, "0000", 4) != 0) {
+		exit(1);
+	}
+    exit(0);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

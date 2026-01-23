@@ -1,0 +1,659 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ make_anal.pc                                 │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ Source Parsing (Makefile)                    │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2012. 11. 20                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain	1
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		내부 사용함수		                                     */
+/*---------------------------------------------------------------*/
+void  	NotUseDataTruncate 		();
+int	  	Convert_FileName 		();
+
+
+/*---------------------------------------------------------------*/
+/*		사용자 변수 선언	                                     */
+/*---------------------------------------------------------------*/
+int 	nRet                            ;
+int 	i_cnt                           ;
+int     nRet1                           ;
+int		conflag                         ;
+int		nQryCnt                         ;
+int 	nTestPort                       ;
+char	col_SYS_CD             [dfSysCD];
+char	RsrcCD                [dfRsrcCD];
+char	DsnCD                  [dfDsnCD];
+char	RstDsnCD               [dfDsnCD];
+char	ItemId                [dfItemID];
+char	RstItemId             [dfItemID];
+char	indat                     [4096];
+char	systime1    [16], sysdate1 [16];
+char	systime2    [16], sysdate2 [16];
+char	systime3    [16], sysdate3 [16];
+char 	RsrcName            [dfRsrcName];
+char	filename            [dfFullPath]; 
+char	szDVServerIP           [dfSvrIP];
+char	makeParm            [dfRsrcName];
+char	tempParm            [dfRsrcName];
+char    gBackPath                [dfDir];
+char    hCM_SRCDSN                [20+1];
+char 	hCM_PROCNM                [20+1];
+char 	hCM_SRCNM                 [20+1];
+char 	col_DSNCD              [dfDsnCD];
+char 	src_DSNCD              [dfDsnCD];
+char    col_PROCNM          [dfRsrcName];
+char    col_RSRCNAME        [dfRsrcName];
+char    szCmd                      [128];
+char    szProgPath               [dfDir];
+char    sExeName            [dfRsrcName];
+char 	SerVerCD               [dfSvrCD];
+char    SV_ProdHome              [dfDir];
+char    SV_DevHome               [dfDir];
+char    Dev_ProgPath             [dfDir];
+char 	**gEnvp                         ;
+FILE 	*fptr                           ;
+CMD_INFO	CmdInfo                     ;
+
+#define	REC_BUF      3000              /* Buffer Size   */
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*               Makefile Parsing Main                           */
+/*                                                               */
+/*****************************************************************/
+int 	main(int argc, char **argv, char **envp)
+{
+	
+    if (argc < 2) {
+        printf ("USAGE : %s <ItemId> <FileName> \n", argv[0]);
+        exit (1);
+    }
+
+    gEnvp = envp;
+
+    InitCmdInfo(&CmdInfo);
+
+    sprintf(ItemId, "%s", argv[1]);      /* Item Id      */
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+    if (ConnectDB() != TRUE) {
+        printf("Oracle DB Connect Error... [%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+        exit (1);
+    }
+    
+    EXEC SQL
+		SELECT  CR_SYSCD
+		      , CR_DSNCD
+		      , CR_RSRCNAME
+		  INTO  :col_SYS_CD
+		  	  , :DsnCD
+		  	  , :RsrcName
+	  	  FROM  CMR0020
+		 WHERE  CR_ITEMID = :ItemId;
+
+	if (sqlca.sqlcode != 0) {
+	    printf("CMR0020 SELECT SQL Err [%s] 01 27 [%d][%s]\n", ItemId, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+	    exit (1);
+	}
+	
+	NotUseDataTruncate(col_SYS_CD, 0x20);
+	NotUseDataTruncate(DsnCD, 0x20);
+	NotUseDataTruncate(RsrcName, 0x20);
+
+
+    if (argc == 3 && strcmp(argv[2],"REAL") == 0) {
+    	sprintf(SerVerCD, "%s", "03"); 
+    }
+    else {
+    	sprintf(SerVerCD, "%s", "01");     
+    }
+    
+		/*-------------------------------------------------------*/
+		/*  서버 정보 조회                                       */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+			SELECT  NVL(a.CM_SvrIP ,' ')
+			      , NVL(a.CM_PortNo,  0)
+			      , a.CM_VOLPATH
+			  INTO  :szDVServerIP
+			  	  , :nTestPort
+			  	  , :SV_ProdHome
+		  	  FROM  CMM0031 a
+		  	      , CMM0038 b
+			 WHERE  a.CM_SysCD  = :col_SYS_CD
+			   AND  a.CM_SvrCD  = :SerVerCD
+			   AND  a.CM_CMPSVR ='Y'
+			   AND  a.CM_SysCd  = b.CM_SysCd
+			   AND  a.CM_SvrCd  = b.CM_SvrCd
+			   AND  a.CM_SEQNO  = b.CM_SEQNO
+	           AND  a.CM_CLOSEDT IS NULL
+	           AND  b.CM_RsrcCD = '27';        /* MAKE FILE */
+	
+		if (sqlca.sqlcode != 0) {
+		    printf("CMM0031, CMM0038 SQL Err [%s] 01 27 [%d][%s]\n", col_SYS_CD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		    exit (1);
+		}
+	
+		NotUseDataTruncate (szDVServerIP, 0x20);
+		NotUseDataTruncate (SV_ProdHome, 0x20);
+	
+		/*-------------------------------------------------------*/
+		/*  서버 자원별 디렉토리 정보 조회                       */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+		SELECT  CM_DirPath             /* 디렉토리 */
+	      INTO  :szProgPath
+	      FROM  CMM0070                /* 서버자원별 디렉토리 정보 */
+	     WHERE  CM_SYSCD = :col_SYS_CD     /* 시스템코드 */
+	       AND  CM_DSNCD = :DsnCD      /* 경로코드 */
+	       AND  CM_CLSDT IS NULL;
+	
+		if (sqlca.sqlcode != 0) {
+		    printf("CMM0070 SQL Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		    exit (1);
+		}
+		NotUseDataTruncate(szProgPath, 0x20);
+
+	    printf("CMM0070 [%s] [%s] [%s]\n", col_SYS_CD, DsnCD, szProgPath);
+	
+		if (memcmp((char *)right_char(szProgPath, 1), "/", 1) != 0)
+			sprintf(szProgPath,"%s%s", szProgPath,"/");
+	
+	    /*-------------------------------------------------------*/
+	    /* 	임시파일 디렉토리 생성 및 파일 OPEN                  */
+	    /*-------------------------------------------------------*/
+		EXEC SQL
+	    	SELECT  CM_Path
+	          INTO  :gBackPath
+	          FROM  CMM0012
+	         WHERE  CM_StNo   = 'ECAMS'
+	           AND  CM_PathCD = '99';
+	
+		if (sqlca.sqlcode != 0) {
+		    printf("CMM0012 SQL Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		    exit (1);
+		}            
+		NotUseDataTruncate(gBackPath, 0x20);
+		
+        if (memcmp((char *)right_char(gBackPath, 1), "/", 1) != 0)
+		    sprintf(gBackPath,"%s/", gBackPath);
+	
+		Local_Dir_Make(gBackPath);
+	    if (strcmp(SerVerCD,"03") == 0) {	       
+			EXEC SQL 
+				SELECT  B.CM_VolPath
+		          INTO  :SV_DevHome
+		          FROM  CMM0031 a
+		              , CMM0038 b
+		         WHERE  a.CM_SysCD = :col_SYS_CD
+		           AND  a.CM_SvrCD = '01'
+		           AND  a.CM_CMPSVR ='Y'
+		           AND  a.CM_SYSCD = b.CM_SYSCD
+		           AND  a.CM_SVRCD = b.CM_SVRCD
+		           AND  a.CM_SEQNO = b.CM_SEQNO
+		           AND  b.CM_RSRCCD = '27';
+		           
+			if (sqlca.sqlcode != 0) {
+				fprintf(stderr, "Test Server 정보 오류 [%d] [%s]\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				exit (1);
+		    }	
+			NotUseDataTruncate (SV_DevHome, 0x20);
+		   
+			if (Char_Check(szProgPath, SV_DevHome) >= 0) {
+				/*sprintf(Dev_ProgPath, "%s", (char *)rep_char(SvrPath, SV_DevHome, SV_ProdHome));*/
+				printf("szProgPath[%s] SV_DevHome[%s] SV_ProdHome[%s]\n", szProgPath, SV_DevHome, SV_ProdHome);
+				sprintf(szProgPath, "%s/%s", SV_ProdHome, (char *)right_char(szProgPath, strlen(szProgPath) - strlen(SV_DevHome)));
+			} 
+	    } 
+	    
+	    /*-------------------------------------------------------*/
+	    /*    해당 System에서 해당자원 GET			             */
+	    /*-------------------------------------------------------*/
+		InitCmdInfo(&CmdInfo);
+	    sprintf(CmdInfo.szServerIP, szDVServerIP);
+	    CmdInfo.nPort = nTestPort;
+	    sprintf(CmdInfo.szJobGub, "G");
+	    sprintf(CmdInfo.szRemote, "%s%s", szProgPath, RsrcName);
+	    sprintf(CmdInfo.szLocal , "%s%s", gBackPath,  RsrcName);
+	    Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO (&CmdInfo);
+
+	    if (memcmp(CmdInfo.szRstCond, "0000", 4) != 0) {
+		    printf("서버에서 파일 가져오지 못함 [%s/%s]\n",CmdInfo.szRstCond,CmdInfo.szRemote);
+		    return (1);
+		}
+	    sprintf(filename, "%s%s", gBackPath, RsrcName);
+
+    /*-----------------------------------------------------------*/
+    /*   Parsing File Open  Read                                 */
+    /*-----------------------------------------------------------*/
+    if ((fptr = fopen(filename,"r")) == (FILE *) NULL) {
+        printf("FILE Open Error [%s]\n", filename);
+    	return (1);
+    }
+
+    /*-----------------------------------------------------------*/
+    /* 	분석 keyword 추출                                        */
+    /*-----------------------------------------------------------*/
+    EXEC SQL
+    	SELECT  CM_SRCDSN
+    	       ,CM_PROCNM
+    	       ,CM_SRCNM
+    	  INTO  :hCM_SRCDSN
+    	  	   ,:hCM_PROCNM
+    	  	   ,:hCM_SRCNM
+    	  FROM  CMM0030                /* 시스템정보 */
+    	 WHERE  CM_SYSCD = :col_SYS_CD;    /* 시스템코드 */
+
+	if (sqlca.sqlcode != 0) {
+	    printf("CMM0030 SQL Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+	    exit (1);
+	}
+	NotUseDataTruncate(hCM_SRCDSN, 0x20);
+	NotUseDataTruncate(hCM_PROCNM, 0x20);
+	NotUseDataTruncate(hCM_SRCNM , 0x20);
+
+  	conflag = 0;
+  	memset(col_DSNCD   , 0x00, sizeof(col_DSNCD   ));
+  	memset(src_DSNCD   , 0x00, sizeof(src_DSNCD   ));
+  	memset(col_PROCNM  , 0x00, sizeof(col_PROCNM  ));
+  	memset(col_RSRCNAME, 0x00, sizeof(col_RSRCNAME));
+
+	if (strlen(hCM_SRCDSN) == 0) {              /* 디렉토리 없으면 */
+	    strcpy(col_DSNCD, (char *)trunc_char(DsnCD)); /* Argument2의 경로코드로 설정 */
+    }
+    
+	while ((fgets(indat, REC_BUF, fptr)) != (char *) NULL ) {
+		Trunc_NewLine(indat);
+
+		if ((memcmp(indat, "#", 1) == 0) ||    /* Comment */
+		    (strlen(indat) == 0)) {            /* 빈 라인 */
+		    continue;                          /* Line Skip */
+		}
+		strcpy(indat, (char *)trunc_char(indat));
+		if (memcmp((char *)right_char(indat,1), "\\", 1) != 0) {
+		    conflag = 0;
+		}
+		else {
+		    strcpy(indat, (char *)left_char(indat, strlen(indat) - 1));
+		    conflag = 1;
+		}
+		strcpy(indat, (char *)trunc_char(indat));
+
+		nRet = Char_Check(indat, "=");		
+		if (nRet >= 0) {
+		    memcpy(makeParm, indat, nRet);
+		    strcpy(makeParm, (char *)trunc_char(makeParm));
+		    strcpy(indat, (char *)right_char(indat, strlen(indat) - nRet - 1));
+		    strcpy(indat, (char *)trunc_char(indat));
+		}
+        
+		if (nRet >= 0 && strlen(makeParm) > 0 && strlen(hCM_PROCNM) > 0 && Char_Check(hCM_PROCNM, makeParm) >= 0)    /* 프로시저명 */
+		{
+			fprintf(stdout, "프로시져명:[%s] [%s] [%s]\n", makeParm, hCM_PROCNM, indat);
+		    strcpy(col_PROCNM, (char *)trunc_char(indat));
+		    continue;
+		}
+
+		if (strlen(makeParm) > 0 && strlen(hCM_SRCDSN) > 0 && Char_Check(hCM_SRCDSN, makeParm) == 0) {
+			NotUseDataTruncate(indat, 0x20);
+			
+            /*---------------------------------------------------*/
+            /*  서버 자원별 디렉토리 정보 조회                   */
+            /*---------------------------------------------------*/
+            EXEC SQL
+            SELECT  CM_DsnCD                      
+              INTO  :RstDsnCD                     
+              FROM  CMM0070                       
+             WHERE  CM_SYSCD   = :col_SYS_CD      
+               AND  CM_DirPath = :indat           
+               AND  CM_CLSDT IS NULL;
+
+            if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+                printf("CMM0070 SQL-2 Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+                exit (1);
+            }
+            else 
+            if (sqlca.sqlcode == 1403) {    
+                continue;
+            }
+            else {
+                NotUseDataTruncate(RstDsnCD, 0x20);
+		        strcpy(col_DSNCD, (char *)trunc_char(RstDsnCD));
+		        strcpy(src_DSNCD, (char *)trunc_char(RstDsnCD));
+		        continue;
+		    }
+		}
+
+		if (strlen(makeParm) > 0 && strlen(hCM_SRCNM) > 0 && Char_Check(hCM_SRCNM, makeParm) >= 0) {
+            /*---------------------------------------------------*/
+            /*  파일명 여러건 존재시 처리                        */
+            /*---------------------------------------------------*/
+            do {  
+            	nRet = Char_Check(indat, " ");
+				memset(col_RSRCNAME,  0x00, sizeof(col_RSRCNAME));  	
+				if (nRet >= 0) {
+					memset(tempParm,  0x00, sizeof(tempParm));
+					memcpy(tempParm, indat, nRet);
+					strcpy(tempParm, (char *)trunc_char(tempParm));
+					strcpy(indat, (char *)right_char(indat, strlen(indat) - nRet - 1));
+					strcpy(indat, (char *)trunc_char(indat));
+					strcpy(col_RSRCNAME, (char *)trunc_char(tempParm));
+				}
+				else {
+					strcpy(indat, (char *)trunc_char(indat));
+					strcpy(col_RSRCNAME, (char *)trunc_char(indat));
+				}
+				
+                /*-----------------------------------------------*/
+	            /*  프로그램등록유무 Check                       */
+	            /*-----------------------------------------------*/
+	            if (strlen(src_DSNCD) == 0)
+					Convert_FileName (filename, col_SYS_CD, col_RSRCNAME, DsnCD, RstDsnCD);
+				else
+					sprintf(RstDsnCD,"%s",src_DSNCD);
+				
+				nRet1 = Char_Check(col_RSRCNAME, "/");
+				if (nRet1 >= 0) {
+				   strcpy(col_RSRCNAME, (char *)right_char(col_RSRCNAME, strlen(col_RSRCNAME) - nRet1 - 1));
+			    } 
+			    else {
+					nRet1 = Char_Check(col_RSRCNAME, "$(");
+					if (nRet1 >= 0 ) {
+						nRet1 = Char_Check(col_RSRCNAME, ")");
+						if (nRet1 >= 0 ) {
+							strcpy(col_RSRCNAME, (char *)right_char(col_RSRCNAME, strlen(col_RSRCNAME) - nRet1 - 1));
+						} 
+					}
+				}
+			
+	            EXEC SQL
+		            SELECT  CR_ITEMID                    
+		              INTO  :RstItemId
+		              FROM  CMR0020                     
+		             WHERE  CR_SYSCD   = :col_SYS_CD    
+		               AND  CR_DSNCD   = :RstDsnCD
+		               AND  CR_RsrcName= :col_RSRCNAME; 
+	
+	            if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+	                printf("CMR0020 SELECT Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+	                printf("CMR0020 col_SYS_CD   = [%s]\n",col_SYS_CD  );
+	                printf("CMR0020 col_RSRCNAME = [%s]\n",col_RSRCNAME);
+	                exit (1);
+	            }
+	            else 
+	            if (sqlca.sqlcode == 1403) {     /* 등록된 프로그램이 없으면 */ 
+	                 /*------------------------------------------*/
+					 /*   자원의 확장자 추출                     */
+					 /*------------------------------------------*/
+					 nRet1 = Right_Char_Check(col_RSRCNAME, '.');
+					 
+					 if (nRet1 < 0) {
+					     sprintf(sExeName, "%s", col_RSRCNAME); 
+					     NotUseDataTruncate (sExeName, 0x20);
+					 }
+					 else {
+					     sprintf(sExeName, "%s", (char *)left_char(col_RSRCNAME, nRet1));
+					     NotUseDataTruncate (sExeName, 0x20);
+					 }
+					 
+					/*-------------------------------------------*/
+		            /*  프로그램등록유무 Check                   */
+		            /*-------------------------------------------*/
+		            EXEC SQL
+			            SELECT  CR_ITEMID
+			              INTO  :RstItemId
+			              FROM  CMR0020                   
+			             WHERE  CR_SYSCD   = :col_SYS_CD  
+		                   AND  CR_RSRCCD  < '20'
+			               AND  SUBSTR(CR_RsrcName, 1, LENGTH(:sExeName)) = :sExeName;
+		
+		            if (sqlca.sqlcode != 0 || sqlca.sqlcode == 1403) {
+		                printf("CMR0020 SELECT 2 Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		                printf("CMR0020 col_SYS_CD   = [%s]\n",col_SYS_CD  );
+	                    printf("CMR0020 sExeName = [%s]\n",sExeName);
+		                continue;
+		            }		            
+	            }
+	            NotUseDataTruncate(RstItemId, 0x20);
+	            
+				/*-----------------------------------------------*/
+				/*  파일명 기존자료 삭제                         */
+				/*-----------------------------------------------*/
+				EXEC SQL
+					DELETE  CMD0010
+	                 WHERE  CD_ITEMID   = :RstItemId       
+	                   AND  CD_MAKEITEM = :ItemId;     
+	                 	
+				/*-----------------------------------------------*/
+				/*  파일명 생성자료 추가                         */
+				/*-----------------------------------------------*/
+				EXEC SQL
+               		INSERT  INTO  CMD0010 
+               			( CD_ITEMID
+               			, CD_MAKEITEM
+               			, CD_EDITOR
+               			, CD_LASTDT
+               			)
+                     VALUES 
+                     	( :RstItemId 
+                     	, :ItemId
+                     	, NULL
+                     	, SYSDATE
+                     	);
+                     	
+               if (sqlca.sqlcode != 0) {
+                   printf("CMD0010 INSERT Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+                   fprintf(stderr, "col_SYS_CD   = [%s]\n", col_SYS_CD   );
+                   fprintf(stderr, "col_DSNCD    = [%s]\n", col_DSNCD    );
+                   fprintf(stderr, "col_RSRCNAME = [%s]\n", col_RSRCNAME );
+                   fprintf(stderr, "DsnCD        = [%s]\n", DsnCD        ); 
+                   fprintf(stderr, "RsrcName     = [%s]\n", RsrcName     );
+                   exit (1);
+               }
+			   printf("CMD0010 INSERTED= SYS_CD[%s] col_DSNCD[%s] col_RSRCNAME[%s] col_PROCNM[%s] \n",col_SYS_CD, col_DSNCD,col_RSRCNAME,col_PROCNM);
+               
+               if (strlen(col_PROCNM) > 0) {
+					/*-------------------------------------------*/
+					/*  파일명과 프로시저 기존자료 삭제          */
+					/*-------------------------------------------*/
+	               	EXEC SQL
+		               DELETE  CMD0011
+		                WHERE  CD_ITEMID   = :ItemId
+		                  AND  CD_PRCITEM  = :col_PROCNM;   
+		                  	
+					/*-------------------------------------------*/
+					/*  파일명과 프로시저 추가                   */
+					/*-------------------------------------------*/
+					EXEC SQL
+	               		INSERT  INTO  CMD0011 
+	               			( CD_ITEMID
+	               			, CD_PRCITEM
+	               			, CD_EDITOR
+	               			, CD_LASTDT
+	               			)
+	               		VALUES 
+	               			( :ItemId 
+                     		, :col_PROCNM
+                     		, NULL
+                     		, SYSDATE
+                     		);
+                     		
+	               if (sqlca.sqlcode != 0) {
+	                   printf("CMD0011 INSERT Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+	                   exit (1);
+	               }
+				   printf("CMD0011 INSERTED= SYS_CD[%s] col_DSNCD[%s] col_RSRCNAME[%s] col_PROCNM[%s] \n",col_SYS_CD, col_DSNCD,col_RSRCNAME,col_PROCNM);
+               }
+			} while( nRet > 0);
+		}
+
+		if (conflag == 0) {
+		    memset(makeParm, 0x00, sizeof(makeParm));
+		}
+	}
+	fclose (fptr);
+
+	remove(filename); 
+
+    EXEC SQL  COMMIT WORK RELEASE;
+
+    return (0);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*		DIRECTORY  Name  Find                                    */
+/*---------------------------------------------------------------*/
+int		Convert_FileName (char *FileName, char *hostgb, char *szModName, char *DsnCD, char *RstDsnCD)
+{
+FILE	*SrcPtr              ;       /* MakeFile Open Pointer    */
+char	sDirPath		[dfDir];       /* Current Path             */
+char	sFullPath       [dfFullPath];       /* Dir Full Path            */
+char	indat          [4096];       /* File Read Buffer         */
+char	makeParm        [256];
+int		conflag              ;
+int		nRet                 ;
+int		nRet1                ;
+
+	
+	if (Char_Check(szModName, "/") < 0) {
+		sprintf(RstDsnCD, "%s", DsnCD);
+		return (0);
+	}
+	
+	EXEC SQL
+		SELECT  CM_DIRPATH
+		  INTO  :sFullPath
+		  FROM	CMM0070
+		 WHERE  CM_SYSCD = :hostgb
+		   AND  CM_DsnCD = :DsnCD
+		   AND  CM_CLSDT IS NULL;
+	if (sqlca.sqlcode != 0)
+		memset(sFullPath, 0x00, sizeof(sFullPath));
+		
+	NotUseDataTruncate(sFullPath, 0x20);
+	memset(sDirPath , 0x00, sizeof(sDirPath ));
+	
+	while((nRet=Char_Check(szModName,"/")) >= 0)
+	{
+		sprintf(sDirPath, "%s", (char *)left_char(szModName, nRet));
+		sprintf(szModName,(char *)right_char(szModName, strlen(szModName) - nRet - 1));
+		sprintf(szModName,(char *)trunc_char(szModName));
+
+		if (memcmp(sDirPath, "$", 1) == 0)
+		{
+			sprintf(sDirPath, "%s", (char *)rep_char(sDirPath, "$", ""));
+			sprintf(sDirPath, "%s", (char *)rep_char(sDirPath, "(", ""));
+			sprintf(sDirPath, "%s", (char *)rep_char(sDirPath, ")", ""));
+			memset (sFullPath, 0x00, sizeof(sFullPath));
+			
+		    /*---------------------------------------------------*/
+		    /*   Parsing File Open  Read                         */
+		    /*---------------------------------------------------*/
+		    if ((SrcPtr = fopen(FileName,"r")) == (FILE *) NULL) {
+		        printf("FILE Open Error [%s]\n", FileName);
+		        continue;
+		    }
+
+			memset(makeParm , 0x00, sizeof(makeParm ));
+		
+			while ((fgets(indat, 2048, SrcPtr)) != (char *) NULL )
+		    {
+				Trunc_NewLine(indat);
+		
+				if (memcmp(indat, "#", 1) == 0) 	continue;
+		
+				nRet = Char_Check(indat, "=");
+		
+				if (nRet >= 0) {
+					memcpy(makeParm, indat, nRet);
+					strcpy(indat, (char *)right_char(indat, strlen(indat) - nRet - 1));
+					strcpy(makeParm, (char *)trunc_char(makeParm));
+				}
+				
+				strcpy(indat, (char *)trunc_char(indat));
+				
+				if (memcmp((char *)right_char(indat,1), "\\", 1) != 0) {
+					conflag = 0;
+				}
+				else {
+					strcpy(indat, (char *)left_char(indat, strlen(indat) - 1));
+					conflag = 1;
+				}
+		        
+		        if (strcmp(makeParm, sDirPath) == 0) {
+		        	sprintf(sDirPath, "%s", indat);
+
+					if (memcmp((char *)left_char(sDirPath, 1), "/", 1) == 0)
+						sprintf(sDirPath, "%s", (char *)right_char(sDirPath, strlen(sDirPath) - 1));
+
+					sprintf(sFullPath, "%s/%s", sFullPath, sDirPath);
+		        	break;
+		        }
+		        	
+				if (conflag == 0)
+					memset(makeParm, 0x00, sizeof(makeParm));
+			}
+			fclose (SrcPtr);
+		}
+		
+		else
+		if (strcmp(sDirPath, "..") == 0) {
+			nRet1 = Right_Char_Check(sFullPath, '/');		
+			if (nRet1 >= 0)
+				sprintf(sFullPath, "%s", (char *)left_char(sFullPath, nRet1 - 1));
+		}
+
+		else
+		if (strcmp(sDirPath, ".") != 0) {
+			sprintf(sFullPath, "%s/%s", sFullPath, sDirPath);
+		}
+
+		if (memcmp((char *)right_char(sFullPath, 1), "/", 1) == 0)
+			sprintf(sFullPath, "%s", (char *)left_char(sFullPath, strlen(sFullPath) - 1));			
+	}
+	
+	EXEC SQL
+		SELECT  CM_DSNCD
+		  INTO  :RstDsnCD
+		  FROM	CMM0070
+		 WHERE  CM_SYSCD   = :hostgb
+		   AND  CM_DIRPATH = :sFullPath
+		   AND  CM_CLSDT IS NULL;
+	if (sqlca.sqlcode != 0)
+		sprintf(RstDsnCD, "%s", DsnCD);
+		
+	fprintf(stdout, "DSN Conver   : [%s] -> [%s]\n", DsnCD, RstDsnCD);
+
+	return (0);
+					
+}
+   
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

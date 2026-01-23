@@ -1,0 +1,1213 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_chkdoc_sub.pc                          │
+ ├──────┼───────────────────────┤
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2008. 01. 19                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL BEGIN DECLARE SECTION;
+char ConnStr3[50];
+char ConnName3[10];
+EXEC SQL END DECLARE SECTION;
+
+EXEC SQL INCLUDE SQLCA;
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                         */
+/*---------------------------------------------------------------*/
+int  	Process_COMPARE 		();
+int  	Http_Call 		              ();
+int  	pfmFileName_Make 	       ();
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                   */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                   */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                   */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+char gszLogFile[50];	/*Log File Name*/
+char gszLogPath[100];	/*Log File Path*/
+char gszLogMsg[512];	/*Log Message  */
+char gszTempPath[100];	/*Temp Direcotry*/
+
+
+int		main (int argc, char **argv, char **envp)
+{
+	char	szAcptNo[21];
+	char	szSysCD[6];
+	char	szRsrcCD[3];
+	char	szDsnCD[8];
+	char	szRsrcName[512];
+	char	szItemId[13];
+	int		szSerNo;
+	char	szBaseNo[21];
+	int		szBaseSer;
+	char	szReqCD[3];
+	char	szSysGB[2];
+	char	szGbnCd[2];
+	char	szSvrIP[21];
+	int		szPortNo;
+	int     szVersion;
+	char	szSysOS[3];
+	char	szDirPath[512];
+	char	szDirPathTmp[512];
+	char	szDocPath[512];
+	char	szReqPath[512];
+	char	szRepPath[512];
+	char	szBasePath[512];
+	char	szEditor[512];
+	char	szUserName[512];
+	char	szLocal[1024];
+	char	szRemote[1024];
+	char  szResultFile[512];
+	char  szRstMsg[512];
+	
+	char	szDocCD[6];
+	
+	char	szYYYYMM[7];
+	char	szYYYYMMDD[9];
+	
+	char	szATTFile[512];
+	char	szSaveFile[512];
+	
+	char	szLastTime[15];
+	char	szCodeLevel[2];	
+		
+	char	szDiffTmp[512];
+	char	szConvFlag[2];
+	char	iconvFileName[512];	
+	
+	char	szLastFile[512];
+	char	szDiffFile[512];
+	char	szDiffLast[512];
+	char 	befmd5val  [33];
+	char 	aftmd5val  [33];
+	
+	int		cmd0035cnt;
+
+	CMD_INFO	  CmdInfo;
+	
+	int		szReturnVal;
+	
+	char	szAgentDir[21];
+	
+	char	szAnalIP[21];
+	int		szAnalPort;
+	char	szAnalSvrCD[3];
+	char	szAnalSvrName[512];
+	char	szAnalDbUsr[512];
+	char	szAnalDbPass[512];
+	char	szAnalConn[512];
+	char	szAnalAcptNo[21];
+
+	
+	char	inspectionjawon[512];
+	int		nRst;
+	char	szCommand[1000];
+  char    syscmd  [512]; 
+  char  szInfo [100];
+	char	dummy[2048];
+	
+	struct  stat f_st;
+	FILE 	*fptr1;
+		
+	if (argc < 2) {
+        printf ("Usage : %s <ACPTNO> <SYSCD> <RSRCCD> <DSNCD> <RSRCNAME> <SERNO> <BASENO> <REQCD> <SVRIP> <PORTNO> <DIRPATH> <Editor> \n", argv[0]);
+        exit (0);
+    }
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE){
+		/*LOG*/sprintf(gszLogMsg,"[%s] 사전검증 DB Connect Error\n",szAcptNo);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+	 
+    memset(szAcptNo   , 0x00, sizeof(szAcptNo   ));
+    memset(szSysCD   , 0x00, sizeof(szSysCD   ));
+    memset(szRsrcCD   , 0x00, sizeof(szRsrcCD   ));
+    memset(szDsnCD   , 0x00, sizeof(szDsnCD   ));
+    memset(szRsrcName   , 0x00, sizeof(szRsrcName   ));
+    memset(szBaseNo   , 0x00, sizeof(szBaseNo   ));
+    memset(szReqCD   , 0x00, sizeof(szReqCD   ));
+    memset(szSysGB   , 0x00, sizeof(szSysGB   ));
+    memset(szSvrIP   , 0x00, sizeof(szSvrIP   ));
+    memset(szDirPath   , 0x00, sizeof(szDirPath   ));
+    memset(szEditor   , 0x00, sizeof(szEditor   ));
+    memset(szItemId   , 0x00, sizeof(szItemId   ));
+    memset(szGbnCd   , 0x00, sizeof(szGbnCd   ));
+    
+    
+	sprintf(szAcptNo   , "%s", argv[1]);    
+	sprintf(szSysCD   , "%s", argv[2]);    
+	sprintf(szRsrcCD   , "%s", argv[3]);    
+	sprintf(szDsnCD   , "%s", argv[4]);    
+	sprintf(szRsrcName   , "%s", argv[5]);
+	szSerNo = atoi(argv[6]);
+	sprintf(szBaseNo   , "%s", argv[7]);    
+	sprintf(szReqCD   , "%s", argv[8]);    
+	sprintf(szEditor   , "%s", argv[9]);    
+	sprintf(szItemId   , "%s", argv[10]);   
+	sprintf(szGbnCd   , "%s", argv[11]);  
+	
+	
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");
+		
+	InitCmdInfo(&CmdInfo);
+
+	strcpy(CmdInfo.szAcptNo,szAcptNo);
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);	
+	    
+
+	memset(gszTempPath,0x00,sizeof(gszTempPath));
+	SetTempDir("99",gszTempPath);
+	SetTempDir("21",szDocPath);
+	SetTempDir("77",szReqPath);
+	/*-----------------------------------------------------------*/
+	/* 결과 Log 파일 디렉토리 생성 :  오늘 날짜 가져오기	     */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  TO_CHAR(SYSDATE, 'YYYYMM'),TO_CHAR(SYSDATE, 'YYYYMMDD')
+		INTO	:szYYYYMM,:szYYYYMMDD
+		FROM	DUAL;
+
+	NotUseDataTruncate (szYYYYMM, 0x20);	
+	
+	EXEC SQL
+		SELECT CM_INSEXE
+		INTO :inspectionjawon
+		FROM CMM0010
+		WHERE CM_STNO='ECAMS';
+		
+	
+	if (sqlca.sqlcode != 0){
+		/*LOG*/sprintf(gszLogMsg,"[INSERR]inspection 대상 확장자 조회 실패  [%d]",sqlca.sqlcode);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);		
+	}
+	NotUseDataTruncate (inspectionjawon     , 0x20);			
+	
+	/*LOG*/sprintf(gszLogMsg,"[%s] 사전검증프로그램별 처리 시작 [%s] \n",szAcptNo,szRsrcName);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+	
+	EXEC SQL
+		SELECT  a.CM_SYSOS
+		       ,a.CM_SVRIP
+		       ,a.CM_PORTNO
+		       ,a.cm_dir
+		       ,c.cm_info
+		  INTO	:szSysOS
+		  	   ,:szSvrIP
+		  	   ,:szPortNo
+		  	   ,:szAgentDir
+		  	   ,:szInfo
+		  FROM	CMM0031 a, CMM0038 b,CMM0036 c
+		 WHERE	a.CM_SysCD  = :szSysCD
+		   AND  a.CM_SVRCD  = '01'
+		   AND  a.CM_CLOSEDT IS NULL
+		   AND	a.CM_SysCd  = b.CM_SysCd
+		   AND	a.CM_SvrCd  = b.CM_SvrCd
+		   AND	a.CM_SEQNO  = b.CM_SEQNO
+		   AND	b.CM_RsrcCD = :szRsrcCD
+		   AND  B.CM_SYSCD = C.CM_SYSCD
+		   AND  B.CM_RSRCCD = C.CM_RSRCCD;
+		   	
+	if (sqlca.sqlcode != 0){
+		sprintf(gszLogMsg," [%s][%d] server info get err [%s] [%s]  : [%d] "
+					,szAcptNo,szSerNo, szSysCD,szRsrcCD,sqlca.sqlcode);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	}
+	
+	NotUseDataTruncate (szSysOS, 0x20);	
+	NotUseDataTruncate (szSvrIP, 0x20);	
+	NotUseDataTruncate (szAgentDir, 0x20);
+	NotUseDataTruncate (szConvFlag, 0x20);
+	NotUseDataTruncate (szInfo, 0x20);		
+	
+	EXEC SQL
+		SELECT cm_dirpath
+		into :szDirPathTmp
+		from cmm0070
+		where cm_syscd = :szSysCD
+		and   cm_dsncd = :szDsnCD;
+	
+	if (sqlca.sqlcode != 0){
+		sprintf(gszLogMsg," [%s][%d] dirpath info get err [%s] [%s]  : [%d] "
+					,szAcptNo,szSerNo, szSysCD,szDsnCD,sqlca.sqlcode);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	}
+		
+	NotUseDataTruncate (szDirPathTmp, 0x20);	
+	
+	/*------------------------------------------------------------------*/
+	/* 	SYSOS = '03'(windows) && SERVERCD ='01'(check out 서버) (SHB)   */
+	/*------------------------------------------------------------------*/	
+	if (strcmp(szSysOS, "03") == 0 )  {
+		sprintf(szDirPath, "%s%s", szAgentDir,szDirPathTmp );
+
+		while( Char_Check(szDirPath,"/") >= 0){
+			sprintf(szDirPath,"%s",rep_char(szDirPath,"/","\\"));
+		}
+		if (cmp_right_char(szDirPath, 1, "\\") != 0)
+			sprintf(szDirPath,"%s%s", szDirPath,"\\");
+	}
+	else{
+		ChangeVolPath(szSysCD , "01" , szRsrcCD, szSvrIP, szDirPathTmp, szDirPath);
+		if (cmp_right_char(szDirPathTmp, 1, "/") != 0)
+			sprintf(szDirPath,"%s%s", szDirPathTmp,"/");
+	}	
+	
+	sprintf(CmdInfo.szServerIP,"%s",szSvrIP);
+	CmdInfo.nPort = szPortNo;	
+	sprintf(szLocal,"%s/%s.%s.%d",gszTempPath,szRsrcName, szAcptNo, szSerNo);
+	if (access(szLocal,F_OK) == 0) {
+		remove(szLocal);
+	}	
+		
+	EXEC SQL  declare CHKDOC_SUB_CUR cursor for
+		select a.cm_doccd,c.cr_dsncd,c.cr_rsrcname,c.cr_serno,c.cr_itemid,c.cr_befver,c.cr_qrycd
+		  from cmm0501 a,cmr1010 b,cmr1010 c,cmm0036 d,cmm0036 e
+		 where b.cr_acptno = :szAcptNo
+		   and b.cr_status<>'3'
+		   and b.cr_itemid=:szItemId
+		   and b.cr_syscd=a.cm_syscd
+		   and b.cr_rsrccd=a.cm_rsrccd
+		   and b.cr_syscd=d.cm_syscd
+		   and b.cr_rsrccd=d.cm_rsrccd
+		   and b.cr_acptno=c.cr_acptno
+		   and b.cr_itemid=decode(substr(d.cm_info,27,1),'0',c.cr_itemid,c.cr_baseitem)
+		   and c.cr_qrycd in ('03','04')
+		   and c.cr_syscd=e.cm_syscd
+       and c.cr_rsrccd=e.cm_rsrccd
+       and substr(e.cm_info,12,1)='1'
+       and substr(e.cm_info,10,1)='0'
+       and a.cm_doccd=decode(:szGbnCd,'A',DECODE(substr(d.cm_info,27,1),'0','XXXXX','00004'),DECODE(substr(d.cm_info,27,1),'0','00004','XXXXX'))
+		 group by a.cm_doccd,c.cr_dsncd,c.cr_rsrcname,c.cr_serno,c.cr_itemid,c.cr_befver,c.cr_qrycd
+		 union
+		select a.cm_doccd,c.cr_dsncd,c.cr_rsrcname,c.cr_serno,c.cr_itemid,c.cr_befver,c.cr_qrycd
+		  from cmm0501 a,cmr1010 c
+		 where c.cr_acptno = :szAcptNo
+		   and c.cr_status<>'3'
+		   and c.cr_itemid=:szItemId
+		   and c.cr_syscd=a.cm_syscd
+		   and c.cr_rsrccd=a.cm_rsrccd
+		   and c.cr_qrycd='04'
+       and a.cm_doccd=decode(:szGbnCd,'B','00008','XXXXXX')
+		 union
+		select a.cm_doccd,c.cr_dsncd,c.cr_rsrcname,c.cr_serno,c.cr_itemid,c.cr_befver,c.cr_qrycd
+		  from cmm0501 a,cmr1010 c
+		 where c.cr_acptno = :szAcptNo
+		   and c.cr_qrycd in('03','04')
+		   and c.cr_status<>'3'
+		   and c.cr_itemid=:szItemId
+		   and c.cr_syscd=a.cm_syscd
+		   and c.cr_rsrccd=a.cm_rsrccd
+		   and decode(substr(:szInfo,27,1),'1',1, instr(c.cr_rsrcname,'.')) >0
+   	   and decode(substr(:szInfo,27,1),'1',1, instr(:inspectionjawon,substr(c.cr_rsrcname,INSTR(c.cr_rsrcname,'.',1,length(c.cr_rsrcname)-length(replace(c.cr_rsrcname,'.',''))))||',')) > 0	   
+       and a.cm_doccd=decode(:szGbnCd,'B','00040','XXXXX');
+					
+	EXEC SQL open  CHKDOC_SUB_CUR;
+
+
+    while (1) 
+	{
+		EXEC SQL fetch CHKDOC_SUB_CUR into  :szDocCD, :szDsnCD, :szRsrcName, :szSerNo, :szItemId, :szVersion, :szReqCD;
+
+		if (sqlca.sqlcode == 1403)	break;
+		if (sqlca.sqlcode != 0) {
+			sprintf(gszLogMsg,"대상 프로그램 및 산출물 추출 실패 : [%s] [%s] [%d]",szAcptNo, szRsrcName, sqlca.sqlcode);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+			exit(1);
+		}	
+
+		NotUseDataTruncate (szDocCD     , 0x20);
+		NotUseDataTruncate (szDsnCD     , 0x20);
+		NotUseDataTruncate (szRsrcName  , 0x20);
+		
+		sprintf(szRepPath,"%s%s",szDocPath,szYYYYMM);
+		Local_Dir_Make(szRepPath);
+		
+		sprintf(gszLogMsg,"[%s] 프로그램별 사전검증 Start [%s] [%s] ",szAcptNo,szRsrcName,szDocCD);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		
+		memset(szATTFile,0x00,sizeof(szATTFile));
+		memset(szSaveFile,0x00,sizeof(szSaveFile));	
+
+/*		if (strncmp(szDocCD,"00004",5) == 0 || strncmp(szDocCD,"00040",5) == 0){    */
+		if (strncmp(szDocCD,"00004",5) == 0){  /* Diffter List  */						
+			sprintf(CmdInfo.szLocal ,"%s", szLocal);
+			if (strcmp(szGbnCd,"B") == 0) {	
+				if (access(szLocal,F_OK) != 0) {		
+					sprintf(CmdInfo.szRemote,"%s%s",szDirPath, szRsrcName);						
+					strcpy(CmdInfo.szJobGub, "G");				
+					Server_Cmd_JOB(&CmdInfo);
+				} else {
+					strcpy(CmdInfo.szRstCond,"0000");
+				}
+			} else if (strncmp(szDocCD,"00004",5) == 0) {
+				sprintf(CmdInfo.szRemote,"%s/%s/%s.%s.%d",szReqPath, szAcptNo,szRsrcName, szAcptNo, szSerNo);
+				sprintf(szCommand,"\\cp \"%s\" \"%s\"",CmdInfo.szRemote,CmdInfo.szLocal);
+				nRst = system(szCommand) /256;
+				strcpy(CmdInfo.szRstCond,"0000");
+				if (nRst != 0) {
+					sprintf(gszLogMsg,"산출물 작성 전 파일 Copy 실패 1 : [%s] [%d] [%s]",szAcptNo, szSerNo, szCommand);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					strcpy(CmdInfo.szRstCond,"EROR");
+				}
+			}	
+			if (memcmp(CmdInfo.szRstCond, "0000", 4) != 0){
+				sprintf(gszLogMsg,"[%s][%s] 체크인 파일가져오기 실패 szRemote=[%s] szLocal=[%s] Cond=[%s]",szAcptNo,szRsrcName,CmdInfo.szRemote,CmdInfo.szLocal,CmdInfo.szRstCond);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				
+				strcpy(szATTFile,"1");
+				sprintf(szSaveFile,"%s","개발서버 파일수신실패");
+			} else if(stat(CmdInfo.szLocal,&f_st) < 0) {
+				sprintf(gszLogMsg,"체크인파일 ACCESS권한 없음 : [%s] [%s]",szAcptNo, CmdInfo.szLocal);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				
+				strcpy(szATTFile,"1");
+				sprintf(szSaveFile,"%s","파일 ACCESS권한 없음");
+			} else if (f_st.st_size == 0) {
+				sprintf(gszLogMsg,"체크인파일 Size Zero : [%s] [%s] ",szAcptNo, CmdInfo.szLocal);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				
+				strcpy(szATTFile,"1");
+				sprintf(szSaveFile,"%s","파일 Size Zero");
+			} else if (strncmp(szDocCD,"00004",5) == 0) {
+				if (strcmp(szReqCD,"04") != 0) {	
+					strcpy(szATTFile,"3");
+					strcpy(szSaveFile,"신규");	
+				} else {	
+					sprintf(szCommand,"chmod 777 \"%s\"",szLocal);
+				    nRst = system(szCommand) /256;
+				    
+					memset(szDiffTmp,0x00,sizeof(szDiffTmp));				
+					sprintf(szDiffTmp,"%s.back",szLocal);
+					
+					sprintf(szCommand,"\\cp \"%s\" \"%s\"",szLocal,szDiffTmp);
+					nRst = system(szCommand) /256;
+					
+					if (nRst != 0) {
+						sprintf(gszLogMsg,"산출물 작성 전 파일 Copy 실패 2 : [%s] [%d] [%s]",szAcptNo, szSerNo, szCommand);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						continue;
+					}		
+						
+					sprintf(szCommand,"chmod 777 \"%s\"",szDiffTmp);
+			        nRst = system(szCommand) /256;
+			    
+					memset(iconvFileName,0x00,sizeof(iconvFileName));
+				    sprintf(iconvFileName,"%s.iconv",szLocal);
+					sprintf(szCommand,"iconv -f utf8 %s > %s ",szDiffTmp,iconvFileName);
+					nRst = system(szCommand)/256;
+					
+					if (nRst == 0){
+						sprintf(szCommand,"mv %s %s ",iconvFileName,szDiffTmp);
+						system(szCommand);
+					}
+					else{
+						remove(iconvFileName);
+					}
+					
+					sprintf(szLastFile,"%s.last",szLocal);			
+					sprintf(szCommand,"FileRead_cmr0025 \"%s\" \"%s\" %d",szItemId,szLastFile,szVersion);
+					system(szCommand);
+		
+					if (access(szLastFile,F_OK) != 0) {
+						sprintf(gszLogMsg,"산출물 작성을 위한 Last버전 파일 생성 실패 : [%s] [%s] [%s]",szAcptNo, szRsrcName, szCommand);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+											
+						strcpy(szATTFile,"1");
+						strcpy(szSaveFile,"최종버전 파일생성실패");
+					} else {
+						sprintf(szCommand,"chmod 777 \"%s\"",szLastFile);
+					    nRst = system(szCommand) /256;
+					    
+						memset(iconvFileName,0x00,sizeof(iconvFileName));
+						sprintf(iconvFileName,"%s.iconv",szLastFile);
+						
+						sprintf(szCommand,"iconv -f utf8 %s > %s ",szLastFile,iconvFileName);
+						nRst = system(szCommand)/256;
+						
+						if (nRst == 0){
+							sprintf(szCommand,"mv %s %s ",iconvFileName,szLastFile);
+							system(szCommand);
+						}
+						else{
+							remove(iconvFileName);
+						}
+						
+						sprintf(szDiffFile, "%s.diff", szLocal);
+						remove(szDiffFile);
+											
+						/*sprintf(szCommand,"diff -b -w \"%s\" \"%s\"  > \"%s\"",szLastFile,szDiffTmp,szDiffFile);*/
+						sprintf(szCommand,"diff -b -w -C5 \"%s\" \"%s\"  > \"%s\"",szLastFile,szDiffTmp,szDiffFile);
+						nRst = system(szCommand) /256;						
+			            if (nRst != 0 && nRst != 1) {
+							sprintf(gszLogMsg,"파일비교 실패 : [%s] [%s] [%s]",szAcptNo, szRsrcName, szCommand);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+											
+							strcpy(szATTFile,"1");
+							strcpy(szSaveFile,"파일비교실패");
+						} else if (access(szDiffFile,F_OK) != 0) {
+							sprintf(gszLogMsg,"파일비교 결과파일 없음 : [%s] [%s] [%s]",szAcptNo, szRsrcName, szDiffFile);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+											
+							strcpy(szATTFile,"1");
+							strcpy(szSaveFile,"파일비교결과없음");
+						} else if(stat(szDiffFile,&f_st) < 0) {
+							sprintf(gszLogMsg,"파일비교 결과파일 ACCESS권한 없음 : [%s] [%s] [%s]",szAcptNo, szRsrcName, szDiffFile);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+											
+							strcpy(szATTFile,"1");
+							strcpy(szSaveFile,"파일비교 결과파일 ACCESS권한 없음");
+						} else if (f_st.st_size == 0) {
+							sprintf(gszLogMsg,"파일비교결과파일 Size Zero : [%s] [%s] [%s]",szAcptNo, szRsrcName, szDiffFile);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+											
+							strcpy(szATTFile,"1");
+							strcpy(szSaveFile,"파일비교결과파일 Size Zero");
+						} else {	
+							memset(befmd5val,0x00,sizeof(befmd5val));
+							nRst = MD5SUM(szLastFile,befmd5val);
+							if (nRst != 0) {
+								sprintf(gszLogMsg,"MD5 Make Fail 1: [%s] [%s] [%s]",szAcptNo, szRsrcName, szCommand);
+								eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+												
+								strcpy(szATTFile,"1");
+								strcpy(szSaveFile,"MD5 Make Fail");
+							} else {					
+								memset(aftmd5val,0x00,sizeof(aftmd5val));
+								nRst = MD5SUM(szDiffTmp,aftmd5val);
+								if (nRst != 0) {
+									sprintf(gszLogMsg,"MD5 Make Fail 2: [%s] [%s] [%s]",szAcptNo, szRsrcName, szCommand);
+									eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+													
+									strcpy(szATTFile,"1");
+									strcpy(szSaveFile,"MD5 Make Fail");
+								}
+								if (strcmp(befmd5val,aftmd5val) == 0) {
+									strcpy(szATTFile,"6");	
+								} else {
+									strcpy(szATTFile,"0");	
+								}		
+							}				
+					        sprintf(szCommand,"chmod 777 \"%s\"",szDiffFile);
+							nRst = system(szCommand) /256;
+							
+							sprintf(szDiffLast,"%s/%s_%s_%s.txt",szRepPath,szAcptNo,szDocCD,szItemId);							
+							sprintf(gszLogMsg,"파일비교결과파일 COMPARE START : [%s] [%s] [%d]",szAcptNo, szRsrcName, nRst);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+	
+							nRst = Process_COMPARE(szDiffFile,szDiffLast,szRsrcName);
+							if (nRst != 0) {
+								sprintf(gszLogMsg,"파일비교결과파일 Edit Error : [%s] [%s] [%d]",szAcptNo, szRsrcName, nRst);
+								eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+							} 
+					#if 0
+							else {
+								sprintf(szCommand,"\\cp \"%s\" \"%s\"",szDiffFile,szDiffLast);
+								nRst = system(szCommand) /256;
+								if (nRst != 0) {
+									sprintf(gszLogMsg,"파일비교결과파일 Copy실패 : [%s] [%s] [%s]",szAcptNo, szRsrcName, szCommand);
+									eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+								}
+							}		
+					#endif
+	
+				            sprintf(szCommand,"chmod 777 \"%s\"",szDiffLast);
+						    nRst = system(szCommand) /256;
+								
+							sprintf(szATTFile,"%s_%s_%s.txt",szAcptNo,szDocCD,szItemId);
+							sprintf(szSaveFile,"%s/%s",szYYYYMM,szATTFile);
+						}
+					}
+				}
+			}
+		} else if (strncmp(szDocCD,"00008",5) == 0){  /* 영향분석  */			
+    		memset(szAnalAcptNo   , 0x00, sizeof(szAnalAcptNo   ));
+			strcpy(szAnalAcptNo,szBaseNo);	
+    
+    			
+			EXEC SQL 
+				SELECT CM_USERNAME
+				into :szUserName
+				FROM CMM0040
+				WHERE CM_USERID = :szEditor;
+			
+			if (sqlca.sqlcode != 0){
+				sprintf(gszLogMsg," [%s][%d] anal UserName get Err : [%s] [%d] "
+							,szAcptNo,szSerNo, szEditor,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				continue;				
+			}		
+			NotUseDataTruncate (szUserName, 0x20);	
+			
+			
+			EXEC SQL
+				SELECT b.CM_DBUSER, b.CM_DBPASS, b.CM_DBCONN
+				  INTO :szAnalDbUsr, :szAnalDbPass, :szAnalConn
+				  FROM CMM0031 a,CMM0035 b
+				 WHERE a.CM_SYSCD = :szSysCD
+				   AND a.CM_SVRCD = '90'
+				   AND a.CM_CLOSEDT IS NULL
+				   AND a.CM_SYSCD = b.CM_SYSCD
+				   AND a.CM_SVRCD = b.CM_SVRCD
+				   AND a.CM_SEQNO = b.CM_SEQNO
+				   AND ROWNUM = 1;
+				
+				
+			if (sqlca.sqlcode != 0){
+				sprintf(gszLogMsg," [%s][%d] anal  svr info get Info Err : [%d] "
+							,szAcptNo,szSerNo, sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				continue;
+			}
+			
+			NotUseDataTruncate (szAnalDbUsr   , 0x20);
+			NotUseDataTruncate (szAnalDbPass, 0x20);			
+			NotUseDataTruncate (szAnalConn, 0x20);	
+			
+
+			memset(ConnStr3, 0x00, sizeof(ConnStr3));
+			sprintf(ConnStr3, "%s/%s@%s", szAnalDbUsr, szAnalDbPass, szAnalConn);
+					
+			sprintf(ConnName3, "anal");
+				
+			EXEC SQL CONNECT :ConnStr3 AT :ConnName3;	
+				
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg,"[%s][%d] ANAL DB Connect Err [%s] "
+							,szAcptNo,szSerNo,ConnStr3);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				continue;
+			}
+		
+			EXEC SQL AT :ConnName3 EXECUTE 
+				BEGIN
+					:szReturnVal := SCM_IAM.IF33(:szAnalDbUsr,:szAnalAcptNo,:szEditor,:szUserName,:szSysCD,:szDsnCD,:szRsrcName,:szRsrcCD);
+				END;
+			END-EXEC;
+			
+			if (sqlca.sqlcode != 0){
+				/*LOG*/sprintf(gszLogMsg,"[%s][%d] Anal - SCM_IAM.IF33 Call Fail =[%d]", szAcptNo,szSerNo,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				/*LOG*/sprintf(gszLogMsg,"[%s][%d] [%s][%s][%s][%s][%s][%s][%s][%s]", szAcptNo,szSerNo,szAnalDbUsr,szAnalAcptNo,szEditor,szUserName,szSysCD,szDsnCD,szRsrcName,szRsrcCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				continue;
+			}			
+			
+			sprintf(szATTFile,"%d",szReturnVal);
+			sprintf(szSaveFile,"%d",szReturnVal);
+			
+		} 
+		if (strncmp(szDocCD,"00040",5) == 0){  /* 코드인스펙션  */	
+	    	memset(szResultFile   , 0x00, sizeof(szResultFile   ));	
+	    	memset(szRstMsg       , 0x00, sizeof(szRstMsg       ));
+	    	memset(befmd5val      , 0x00, sizeof(befmd5val      ));
+			if (cmp_mid_char(szInfo,27,1,"1") == 0) {  /* 프로프레임 */
+				nRst = pfmFileName_Make(szSysCD,szDirPath, szRsrcCD, szRsrcName, szRemote);
+				if (nRst != 0) {
+					sprintf(gszLogMsg,"PFM FileName Make Fail : [%s] [%s] [%s]",szAcptNo, szRsrcName);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+									
+					strcpy(szATTFile,"-9");
+					strcpy(szSaveFile,"PFM FileName Make Fail");	
+				} else {
+					sprintf(CmdInfo.szRemote,"%s",szRemote);
+					sprintf(CmdInfo.szLocal,"%s",szLocal);	
+					if (access(szLocal,F_OK) == 0) {
+						remove(szLocal);
+					}					
+					strcpy(CmdInfo.szJobGub, "G");				
+					Server_Cmd_JOB(&CmdInfo);	
+					if (memcmp(CmdInfo.szRstCond, "0000", 4) != 0){
+						sprintf(gszLogMsg,"[%s][%s] 파일가져오기 실패 szRemote=[%s] szLocal=[%s] Cond=[%s]",szAcptNo,szRsrcName,CmdInfo.szRemote,CmdInfo.szLocal,CmdInfo.szRstCond);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						
+						strcpy(szATTFile,"-8");
+						sprintf(szSaveFile,"%s","파일수신 실패(개발서버 파일유무 확인)");
+					} else if(stat(CmdInfo.szLocal,&f_st) < 0) {
+						sprintf(gszLogMsg,"체크인파일 ACCESS권한 없음 : [%s] [%s]",szAcptNo, CmdInfo.szLocal);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						
+						strcpy(szATTFile,"-9");
+						sprintf(szSaveFile,"%s","파일 ACCESS권한 없음");
+					} else if (f_st.st_size == 0) {
+						sprintf(gszLogMsg,"체크인파일 Size Zero : [%s] [%s] ",szAcptNo, CmdInfo.szLocal);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						
+						strcpy(szATTFile,"-9");
+						sprintf(szSaveFile,"%s","파일 Size Zero");
+					} else {
+						memset(befmd5val,0x00,sizeof(befmd5val));
+						nRst = MD5SUM(szLocal,befmd5val);
+						if (nRst != 0) {
+							sprintf(gszLogMsg,"Code InspectionMD5 Make Fail : [%s] [%s] [%d]",szAcptNo, szRsrcName, nRst);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+											
+							strcpy(szATTFile,"-9");
+							strcpy(szSaveFile,"Code Inspection MD5 Make Fail");
+						}	
+					}					
+				}
+			} else {
+				memset(befmd5val,0x00,sizeof(befmd5val));
+				nRst = MD5SUM(szLocal,befmd5val);
+				if (nRst != 0) {
+					sprintf(gszLogMsg,"Code InspectionMD5 Make Fail : [%s] [%s] [%d]",szAcptNo, szRsrcName, nRst);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+									
+					strcpy(szATTFile,"-9");
+					strcpy(szSaveFile,"Code Inspection MD5 Make Fail");
+				}
+				sprintf(szRemote,"%s%s",szDirPath,szRsrcName);	
+			}	
+			if (strlen(befmd5val) > 0) {				
+				sprintf(szResultFile,"%s_%d",szAcptNo,szSerNo);
+				nRst = Http_Call(szRemote,befmd5val,szResultFile,szRstMsg,szSysCD);		
+				/* printf("szRemote =[%s] befmd5val =[%s]  szResultFile =[%s] szRstMsg =[%s] szSysCD =[%s]  ", szRemote, befmd5val, szResultFile, szRstMsg, szSysCD); */
+
+				sprintf(gszLogMsg,"szRemote =[%s] befmd5val =[%s]  szResultFile =[%s] szRstMsg =[%s] szSysCD =[%s]  ", szRemote, befmd5val, szResultFile, szRstMsg, szSysCD);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						
+				if (nRst != 0) {
+					sprintf(gszLogMsg,"Code Inspection Call Fail : [%s] [%s] [%s]",szAcptNo, szRsrcName, CmdInfo.szCommand);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+									
+					strcpy(szATTFile,"-9");
+					/* strcpy(szSaveFile,"Code Inspection Call Fail");  */
+					strcpy(szSaveFile,"결과리턴실패");					
+				} else {
+					nRst = Char_Check(szRstMsg,"|");
+					if (nRst > 0) {						
+					nRst = Char_Check(szRstMsg,"|");
+					sprintf(szRstMsg, "%s", right_char(szRstMsg, strlen(szRstMsg) - nRst - 1));	
+													
+					nRst = Char_Check(szRstMsg,"|");
+					strncpy(aftmd5val,szRstMsg,nRst);
+					sprintf(szRstMsg, "%s", right_char(szRstMsg, strlen(szRstMsg) - nRst - 1));
+												
+					nRst = Char_Check(szRstMsg,"|");
+					strncpy(szSaveFile,szRstMsg,nRst);
+					
+					/* 1 -> 분석성공, 0 -> 분석기준미달, -1 -> 분석정보 없음  
+					  # get11 : /userdir/covmwas/devsrc/WEB-INF/src/app/eCmd//Cmd1900.java|6f660c355d0eb8845218fd41bbb616cb||-1
+					    -1로 오는 경우 URL이 Null로 넘어오기 때문에 밑에서 cmd0035 insert가 안됨
+					 */
+					if(strlen(szSaveFile) == 0){
+						sprintf(szSaveFile,"N"); 
+					}	
+					sprintf(szRstMsg, "%s", right_char(szRstMsg, strlen(szRstMsg) - nRst - 1));
+					NotUseDataTruncate (szRstMsg     , 0x20);
+					NotUseDataTruncate (szSaveFile   , 0x20);
+					strcpy(szATTFile,szRstMsg);
+					}	
+				}
+			}			
+		}
+		printf("szDocCD[%s] szSaveFile[%s] szATTFile[%s]", szDocCD,szSaveFile,szATTFile);
+		if (strlen(szSaveFile) > 0 && 	strlen(szATTFile) > 0 ){		
+			cmd0035cnt = 0;
+			EXEC SQL
+				SELECT count(*) 
+				into :cmd0035cnt
+				FROM CMD0035
+				WHERE CD_ITEMID = :szItemId
+				and CD_DOCCD    = :szDocCD
+				and CD_ACPTNO   = :szAcptNo;
+   			
+			if (sqlca.sqlcode !=0 ){
+				cmd0035cnt = 0;
+			}
+				
+			if (cmd0035cnt > 0){
+				EXEC SQL
+					DELETE FROM CMD0035 
+			    	 WHERE CD_ITEMID = :szItemId
+					   and CD_DOCCD  = :szDocCD
+					   and CD_ACPTNO = :szAcptNo;
+
+				if (sqlca.sqlcode !=0 ){
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d] delete cmd0035 err szSysCD=[%s] szDsnCD=[%s] szRsrcName=[%s] szDocCD=[%s] [%d] [%s]\n",szAcptNo,szSerNo, szSysCD, szDsnCD,szRsrcName, szDocCD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					continue;
+				}
+				EXEC SQL COMMIT;
+			}
+								
+			EXEC SQL
+			    INSERT INTO CMD0035(CD_ITEMID, CD_DOCCD, CD_ACPTNO, CD_SAVEFILE,CD_ATTFILE,  CD_CREATDT, CD_LASTDT) 
+				VALUES(:szItemId , :szDocCD, :szAcptNo, :szSaveFile,:szATTFile, SYSDATE, decode(length(:szLastTime),12,to_date(:szLastTime,'yyyymmddhh24miss'),SYSDATE));
+					
+			if (sqlca.sqlcode !=0 ){
+				/*LOG*/sprintf(gszLogMsg,"[%s][%d] insert cmd0035 err  [%d] [%s]\n",szAcptNo,szSerNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				/*LOG*/sprintf(gszLogMsg,"szSysCD=[%s] szDsnCD=[%s] szRsrcName=[%s] szDocCD=[%s] szAcptNo=[%s]\n",szSysCD,szDsnCD, szRsrcName , szDocCD, szAcptNo);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					
+				continue;
+			}
+			EXEC SQL COMMIT;
+		}	
+		
+	}
+	EXEC SQL WHENEVER NOT FOUND CONTINUE;
+  EXEC SQL CLOSE CHKDOC_SUB_CUR;
+	
+	
+		
+		
+	exit(0);
+		
+}
+
+
+int	Http_Call	( char *pFullPath,char *pMD5val, char *pOutName, char *pRstMsg, char *pSysCd){
+
+	char	dummy[2048];
+	char	szCommand[2048];
+	char	szResultFile[512];
+	
+	FILE 	*fptr1;
+	FILE 	*fptr2;
+	
+	int		stCode;
+	int		rtCode;
+	int		retval;
+	
+	
+	char	callMsg[2048];
+	char	callValTmp[10];
+	int		callVal;
+	char  szServerIP [30];
+	int   szPortNo;
+	
+	
+	
+	sprintf(szResultFile,"%s_tmp",pOutName);
+	
+	
+	/*-----------------------------------------------------------*/
+	/*		구분별 처리                                          */
+	/*-----------------------------------------------------------*/
+	/*http://ip:port/getFileInfo.spw?file=절대경로&hash=소스코드 hash값*/
+
+	EXEC SQL
+		SELECT  CM_SVRIP,
+		        CM_PORT
+		INTO    :szServerIP,
+		        :szPortNo       
+		FROM CMM0039
+		WHERE CM_SYSCD = :pSysCd
+		AND   CM_DIRCD = 'CI';   /*이부분수정*/
+				
+				
+	if (sqlca.sqlcode != 0){
+		sprintf(gszLogMsg," CODE INSPECTION  svr info get Info Err : [%d] "
+					, sqlca.sqlcode);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		return 1;
+	}
+	
+	NotUseDataTruncate (szServerIP   , 0x20);
+	/*  sprintf(szCommand,"java HttpCall getFileInfo.spw file=\"%s\"&hash=%s %s %d %s" , pFullPath, pMD5val, szServerIP, szPortNo, szResultFile );  */
+	sprintf(szCommand,"java HttpCall getFileInfo.spw file=\"%s&hash=%s\" %s %d %s" , pFullPath, pMD5val, szServerIP, szPortNo, szResultFile );	
+
+      /* log */
+	sprintf(gszLogMsg,"java HttpCall getFileInfo.spw file=\"%s\"&hash=%s %s %d %s" , pFullPath, pMD5val, szServerIP, szPortNo, szResultFile);
+	eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+	
+	retval = system(szCommand) / 256;
+	
+	if (retval != 0) {		
+		return 1;
+	}
+	
+	/*-----------------------------------------------------------*/
+	/*		처리구분별 처리결과 체크                             */
+	/*-----------------------------------------------------------*/
+  if ((fptr1 = fopen(szResultFile, "r")) == (FILE *) NULL) {
+			return 1;
+	}
+	
+	stCode = 0;
+
+	while (fgets(dummy, 2048, fptr1) != (char *) NULL) {
+		strcpy(dummy,(char *)rep_char(dummy,"\r\n",""));
+		strcpy(dummy,(char *)rep_char(dummy,"\n",""));		
+		strcpy(dummy,(char *)trunc_char(dummy));
+		
+		
+		if (stCode == 0){
+			if (Char_Check(dummy,"|") < 0 ){
+				memset(dummy,0x00,sizeof(dummy));
+				continue;
+			}
+			else{
+				stCode = 1;
+			}			
+		}
+		
+		if (stCode == 1){
+			memset(callValTmp,0x00,sizeof(callValTmp));
+			strcpy(pRstMsg,dummy);
+			break;
+		}		
+	}
+	fclose (fptr1);	
+	remove(szResultFile);	
+	
+	if (stCode == 1) return 0;
+	else return 1;		
+}
+
+int	pfmFileName_Make	( char *pSysCD,char *pDirPath, char *pRsrcCD, char *pRsrcName, char *pFullPath){
+
+/*    신_뱅킹,  00416  IFRS_AP
+/*   00359	NH카드코어     00522 차세대금고AP   00254  재무회계_회계관리	   00255 재무회계_계정처리
+
+	/*LOG*/sprintf(gszLogMsg,"[%s] pfmFileName_Make  pDirPath \n",pDirPath);
+      eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+
+	if (strcmp(pSysCD,"00359") == 0) {    /*NH카드코어 예외사항 */
+		sprintf(pDirPath, "%s", rep_char(pDirPath,"ncsdev","pgm")); 			
+		if (strcmp(pRsrcCD,"76") == 0) {             /*Service Module*/
+			sprintf(pFullPath,"%ssrc/serviceModule/%s/%s.c",pDirPath,pRsrcName,pRsrcName);
+		} else if (strcmp(pRsrcCD,"78") == 0) {    /*Batch Module*/
+			sprintf(pFullPath,"%ssrc/batch/%s.c",pDirPath,pRsrcName);
+		} else {
+			sprintf(pFullPath,"%ssrc/module/%s.c",pDirPath,pRsrcName);
+		}		
+	}else if (strcmp(pSysCD,"00522") == 0 || strcmp(pSysCD,"00254") == 0 || strcmp(pSysCD,"00255") == 0) {    /* 차세대금고 예외사항 */
+		if (strcmp(pRsrcCD,"76") == 0) {            /*Service Module*/
+			sprintf(pFullPath,"%ssrc/service/%s.c",pDirPath,pRsrcName);
+		} else if (strcmp(pRsrcCD,"78") == 0) {    /*Batch Module*/
+			sprintf(pFullPath,"%ssrc/batch/%s.c",pDirPath,pRsrcName);
+		} else {
+			sprintf(pFullPath,"%ssrc/module/%s.c",pDirPath,pRsrcName);
+		}		
+	} else {   /* 신 프레임웍/ IFRS */
+		if (strcmp(pRsrcCD,"76") == 0) {
+			sprintf(pFullPath,"%ssrc/service/%s.c",pDirPath,pRsrcName);
+		} else {
+			sprintf(pFullPath,"%ssrc/module/%s.c",pDirPath,pRsrcName);
+		}
+	}		
+	
+	return 0;	
+}
+
+/*---------------------------------------------------------------*/
+/*		자원의 변경내용 비교 (diff) 처리                         */
+/*---------------------------------------------------------------*/
+int    Process_COMPARE (OLDFile, NEWFile, RsrcName)
+char	*OLDFile  	;
+char	*NEWFile   	;
+char	*RsrcName  	;
+{
+FILE	*OLDPtr			 	  ;
+FILE 	*NEWPtr			 	  ;
+char    dummy           [4096];       /* Read Buffer             */
+char    aftdummy        [4096];       /* Read Buffer             */
+char	LeftStr   		  [20];
+char	RightStr  		  [20];
+char	DiffCmd   		   [5];
+int 	Line1     		      ;
+int 	Line2     		      ;
+int 	Line3     		      ;
+int 	Line4     		      ;
+int		nRet1	              ;
+char	new[3+1], pr[1+1];
+int	read_cnt=0,sw=0,i=0,j=0,st=0,cnt=0;
+int	insert=0,delete=0,update=0,len=0;
+
+	
+
+	sprintf(pr, "%s", "0");
+
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (OLD/NEW File)                                */
+    /*-----------------------------------------------------------*/
+    if ((OLDPtr = fopen(OLDFile,"r")) == (FILE *) NULL)
+        return (2);
+
+    if ((NEWPtr = fopen(NEWFile ,"w")) == (FILE *) NULL) {
+    	fclose (OLDPtr);
+        return (3);
+    }
+    if (pr[0] == '1')
+	{
+		fprintf(NEWPtr,"====================================================================================================================================\n");
+	}
+	else
+	{
+		fprintf(NEWPtr,"=============================================================================\n");
+	}
+    while (1) {
+    	memset(aftdummy,0x00,	sizeof(aftdummy));
+		memset(dummy,	0x00,	sizeof(dummy));
+
+		if (fgets(dummy, sizeof(dummy), OLDPtr) == (char *) NULL)
+		{
+			break;
+		}
+
+		j	=	0;
+		for (i=0; i < sizeof(dummy); i++)
+		{
+			if (dummy[i] == 0x09)	/* tab 값 */
+			{
+				memcpy(aftdummy+j,	"   ",	3);
+				j = j + 3;
+			}
+			else
+			{
+				aftdummy[j]	= dummy[i];
+				j++;
+			}
+		}
+		
+		if (memcmp(aftdummy, "No differences encountered", 26) == 0)
+		{
+			printf("변경된 내용이 없습니다\n");
+			printf("변경된 내용이 없습니다\n");
+			printf("변경된 내용이 없습니다\n");
+			fprintf(NEWPtr,"변경된 내용이 없습니다\n");
+			break;
+		}
+		
+		read_cnt++;
+		if (read_cnt == 1) continue;
+		if (read_cnt == 2) continue;
+		/*
+		if (memcmp(aftdummy,"*** ", 4) == 0) continue;
+		if (memcmp(aftdummy,"--- ", 4) == 0) continue;
+		if (memcmp(aftdummy,"***************", 15) == 0) continue;
+		*/	
+
+		if (read_cnt == 1)
+		{
+			if (memcmp(new,	"new",	3) == 0)
+			{
+				fprintf(NEWPtr,"변경전 : 신규PROGRAM입니다\n"); continue;
+			}
+			else
+			{
+				fprintf(NEWPtr,"변경전 : %s", aftdummy+4);	continue;
+			}
+		}
+ 
+		if (read_cnt == 2)
+		{
+			fprintf(NEWPtr,"변경후 : %s", aftdummy+4);	continue;
+		}
+
+		if (memcmp(aftdummy,"*** ", 4) == 0)
+		{
+			sw	=	1;	
+			
+			fprintf(NEWPtr,"********** [변경전] ********** %s",aftdummy);	
+			continue;
+		}
+		
+		if (memcmp(aftdummy,"--- ", 4) == 0)
+		{
+			sw	=	2;	
+			fprintf(NEWPtr,"---------- [변경후] ---------- %s",aftdummy);	
+			continue;
+		}
+
+		if (memcmp(aftdummy,"***************", 15) == 0)
+		{
+			if (pr[0] == '1')
+			{
+				fprintf(NEWPtr,"====================================================================================================================================\n");
+			}
+			else
+			{
+				fprintf(NEWPtr,"=============================================================================\n");
+			}
+
+			continue;
+		}
+		
+		
+		if (pr[0] == '1')
+		{
+			switch(aftdummy[0])
+			{
+				case	'!':
+				{
+					aftdummy[0]	=	' ';
+					if (memcmp(new,	"new",	3) == 0)
+					{
+						fprintf(NEWPtr,"신  규:%.250s",aftdummy);
+					}
+					else
+					{
+						if (sw == 1)	
+						{
+							fprintf(NEWPtr,"수정전:%.250s",aftdummy);
+						}
+	
+						if (sw == 2)	
+						{
+							fprintf(NEWPtr,"변  경:%.250s",aftdummy);
+							update++;
+						}
+					}
+				}
+				break;
+
+				case	'+':
+				{
+					aftdummy[0]	=	' ';
+					if (memcmp(new,	"new",	3) == 0)
+					{
+						fprintf(NEWPtr,"신  규:%.250s",aftdummy);
+					}
+					else
+					{
+						fprintf(NEWPtr,"추  가:%.250s",aftdummy);
+						insert++;
+					}
+				}
+				break;
+
+				case	'-':
+				{
+					aftdummy[0]	=	' ';
+					fprintf(NEWPtr,"삭  제:%.250s",aftdummy);
+					delete++;
+				}
+				break;
+
+				default:
+				{
+					fprintf(NEWPtr,"       %.250s",aftdummy);
+				}
+			}
+
+			if (strlen(aftdummy) > 250)
+			{
+				for (cnt=250; cnt < strlen(aftdummy); cnt+=250)
+				{
+					fprintf(NEWPtr,"\n -     %.250s",aftdummy+cnt);
+				}
+			}
+		}
+		else
+		{
+			switch(aftdummy[0])
+			{
+				case	'!':
+				{
+					aftdummy[0]	=	' ';
+					if (sw == 1)	
+					{
+						fprintf(NEWPtr,"수정전:%.150s",aftdummy);
+					}
+	
+					if (sw == 2)	
+					{
+						fprintf(NEWPtr,"변  경:%.150s",aftdummy);
+						update++;
+					}
+				}
+				break;
+
+				case	'+':
+				{
+					aftdummy[0]	=	' ';
+					if (memcmp(new,	"new",	3) == 0)
+					{
+						fprintf(NEWPtr,"신  규:%.150s",aftdummy);
+					}
+					else
+					{
+						fprintf(NEWPtr,"추  가:%.150s",aftdummy);
+						insert++;
+					}
+				}
+				break;
+
+				case	'-':
+				{
+					aftdummy[0]	=	' ';
+					fprintf(NEWPtr,"삭  제:%.150s",aftdummy);
+					delete++;
+				}
+				break;
+
+				default:
+				{
+					fprintf(NEWPtr,"       %.150s",aftdummy);
+				}
+			}
+
+			if (strlen(aftdummy) > 150)
+			{
+				for (cnt=150; cnt < strlen(aftdummy); cnt+=150)
+				{
+					fprintf(NEWPtr,"\n -     %.150s",aftdummy+cnt);
+				}
+			}
+		}
+	}
+	if (pr[0] == '1')
+	{
+		fprintf(NEWPtr,"====================================================================================================================================\n");
+	}
+	else
+	{
+		fprintf(NEWPtr,"=============================================================================\n");
+	}
+
+	fprintf(NEWPtr,"\n[수정내용:%s] ◎삭제:%4d Line  ◎추가:%4d Line  ◎변경:%4d Line\n",RsrcName,delete,insert,update);
+
+	if (pr[0] == '1')
+	{
+		fprintf(NEWPtr,"====================================================================================================================================\n");
+	}
+	else
+	{
+		fprintf(NEWPtr,"=============================================================================\n");
+	}
+
+	fclose (OLDPtr);
+	fclose (NEWPtr);
+	return (0);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

@@ -1,0 +1,14 @@
+CC	= cc
+CFLAGS	= -g
+INCLUDE	=	-I. -I../inc
+
+all: md5
+
+.SUFFIXES: .c .o
+
+clean:
+	rm -f *.o core
+
+md5:
+	$(CC)  -c $@.c -o $@.o $(INCLUDE)
+	mv $@.o ../object

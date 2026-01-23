@@ -1,0 +1,94 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ FileWrite_cmr0027.pc                         │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ORACLE DB (CMR0027)에 Write 하는 프로그램    │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include 	<ecamsapi.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+#define FALSE 0
+#define TRUE 1
+
+#define system(t) callsystem(t)
+
+#define TERM(X) ( X.arr[X.len] = '\0' )
+#define SLEN(X) ( X.len = strlen((char *)X.arr) )
+
+#define READ_SIZE 4096
+
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*     CMR0027에 Write 하는 프로그램    M A I N                  */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char  	action_str                 [256];
+long  	amount                          ;
+long  	offset                          ;
+short 	done                            ;
+long  	total                           ;
+char 	szSysCD                [dfSysCD];
+char 	szAcptNo              [dfAcptNo];
+char 	szFileName          [dfFullPath];
+char 	szOutName           [dfFullPath];
+char 	szReqCD                [dfReqCD];
+char 	szCommand           [dfFullPath];
+char 	szDiffFile          [dfFullPath];
+char	szItemId	          [dfItemID];
+int		szVer                           ;
+
+
+	if (argc < 5) {
+        printf ("usage : %s <ACPT_NO> <CR_ITEMID> <ver> <OutFileName> \n", argv[0]);
+        exit (0);
+    }
+
+	memset(szItemId, 0x00, sizeof(szItemId));
+
+	szVer = atoi(argv[3]);
+	sprintf(szOutName, "%s", argv[4]);
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+    /*-----------------------------------------------------------*/
+    /*   파일을 테이블에 저장                                    */
+    /*-----------------------------------------------------------*/
+	if (InsertFileToDB(argv[1], argv[2], szVer, szOutName) == FALSE) {
+		EXEC SQL ROLLBACK WORK RELEASE;
+		exit(1);
+	}
+	EXEC SQL COMMIT WORK RELEASE;
+	exit(0);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/
+
+

@@ -1,0 +1,523 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_PFeffect.pc                            │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ProFrame 테이블 CRUD 영향도 작성             │
+ │            │ - 체크인대상 리소스에 대하여 참조하는        │
+ │            │   CRUD METRIX 정보를 프로프레임에 요청하여   │
+ │            │   대상정보를 형상관리에서 관리한다.          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 09. 29                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+FILE *fp;
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Effect_Insert_R                                  */
+/*	Action    : 프로프레임 CALL 리소스 영향도 자료 작성          */
+/*	Parameter :	pSysCD           : 시스템코드                    */
+/*	            pDsnCD           : 디렉토리코드                  */
+/*	            pRSRCNAME        : 물리명(자원명)                */
+/*	            pCALLRsrcType    : CALL 리소스 타입              */
+/*	            pCALLRsrcName    : CALL 리소스 명                */
+/*	            pCALLRsrcComment : CALL 리소스 논리명            */
+/*	            pCALLOwner       : CALL 리소스 Owner             */
+/*	Return    : 처리결과                                         */
+/*---------------------------------------------------------------*/
+int		Effect_Insert_R	( char *pItemId
+						, char *pSYSCD
+						, char *pRefItem
+						, char *pRSRCNAME
+						, char *pCALLRsrcType
+						, char *pCALLRsrcName
+						, char *pCALLRsrcComment
+						, char *pCALLOwner
+						)
+{
+int		nCnt                     ;     /* 연관도 등록 여부       */
+char	szRsrcCD            [5+1];     /* 자원구분코드           */
+
+	/*-----------------------------------------------------------*/
+	/*	자원에 대한 디렉토리 코드 조회                           */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  COUNT(*)
+		  INTO  :nCnt
+		  FROM  CMD0201
+		 WHERE  CD_SYSCD     = :pSYSCD
+		   AND  CD_ITEMID    = :pItemId
+		   AND  CD_REFITEMID = :pRefItem;
+
+	if (sqlca.sqlcode != 0)
+		nCnt = 0;
+
+	/*-----------------------------------------------------------*/
+	/*	자원구분 코드 조회                                       */
+	/*-----------------------------------------------------------*/
+	/*
+	EXEC SQL
+		SELECT  CM_MICODE
+		  INTO  :szRsrcCD
+		  FROM  CMM0020
+		 WHERE  CM_MACODE   = 'RSRCTYPE'
+		   AND  CM_CODENAME = :pCALLRsrcType
+		   AND  CM_CLOSEDT IS NULL;
+
+	if (sqlca.sqlcode != 0)
+		memset(szRsrcCD, 0x00, sizeof(szRsrcCD));
+	*/
+	sprintf(szRsrcCD,"%s",pCALLRsrcType);
+	NotUseDataTruncate (szRsrcCD, 0x20);
+	
+
+	/*-----------------------------------------------------------*/
+	/*	리소스 연관도 등록                                       */
+	/*-----------------------------------------------------------*/
+	if (nCnt == 0) {
+		EXEC SQL
+			INSERT  INTO  CMD0201
+				( CD_ITEMID
+				, CD_SYSCD
+			    , CD_RSRCNAME
+			    , CD_CALLNAME
+			    , CD_CALLRSRCCD
+			    , CD_CALLCOMMENT
+			    , CD_CALLUSER
+			    , CD_REFITEMID
+			    )
+			VALUES
+				( :pItemId
+				, :pSYSCD
+				, :pRSRCNAME
+				, :pCALLRsrcName
+				, :szRsrcCD
+				, :pCALLRsrcComment
+				, :pCALLOwner
+				, :pRefItem
+				);
+	} else {
+		EXEC SQL
+			UPDATE  CMD0201
+			   SET  CD_CALLRSRCCD=:szRsrcCD
+			       ,CD_CALLCOMMENT=:pCALLRsrcComment
+			       ,CD_CALLUSER=:pCALLOwner
+			       ,CD_REFITEMID=:pRefItem
+			 WHERE  CD_SYSCD     = :pSYSCD
+		       AND  CD_ITEMID    = :pItemId
+		       AND  CD_REFITEMID = :pRefItem;
+	}
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr, "CMD0201 등록 오류 : [%d] [%s]\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return (1);
+	}
+
+	return (0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Effect_Insert_I                                  */
+/*	Action    : 프로프레임 CALL 리소스 영향도 자료 작성          */
+/*	Parameter :	pSysCD           : 시스템코드                    */
+/*	            pDsnCD           : 디렉토리코드                  */
+/*	            pRSRCNAME        : 물리명(자원명)                */
+/*	            pCALLRsrcType    : CALL 리소스 타입              */
+/*	            pCALLRsrcName    : CALL 리소스 명                */
+/*	            pCALLRsrcComment : CALL 리소스 논리명            */
+/*	Return    : 처리결과                                         */
+/*---------------------------------------------------------------*/
+int		Effect_Insert_I	( char *pItemId
+						, char *pSYSCD
+						, char *pRefItem
+						, char *pRSRCNAME
+						, char *pCALLRsrcType
+						, char *pCALLRsrcName
+						, char *pCALLRsrcComment
+						)
+{
+int		nCnt                     ;     /* 연관도 등록 여부       */
+char	szRsrcCD            [5+1];     /* 자원구분코드           */
+
+	/*-----------------------------------------------------------*/
+	/*	자원에 대한 디렉토리 코드 조회                           */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  COUNT(*)
+		  INTO  :nCnt
+		  FROM  CMD0204
+		 WHERE  CD_ITEMID     = :pItemId
+		   AND  CD_REFITEMID  = :pRefItem;
+
+	if (sqlca.sqlcode != 0)
+		nCnt = 0;
+
+	/*-----------------------------------------------------------*/
+	/*	자원구분 코드 조회                                       */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_MICODE
+		  INTO  :szRsrcCD
+		  FROM  CMM0020
+		 WHERE  CM_MACODE   = 'RSRCTYPE'
+		   AND  CM_CODENAME = :pCALLRsrcType
+		   AND  CM_CLOSEDT IS NULL;
+
+	if (sqlca.sqlcode != 0)
+		memset(szRsrcCD, 0x00, sizeof(szRsrcCD));
+
+	NotUseDataTruncate (szRsrcCD, 0x20);
+
+
+	/*-----------------------------------------------------------*/
+	/*	리소스 연관도 등록                                       */
+	/*-----------------------------------------------------------*/
+	if (nCnt == 0) {
+		EXEC SQL
+			INSERT  INTO  CMD0204
+				( CD_ITEMID
+				, CD_SYSCD
+			    , CD_RSRCNAME
+			    , CD_CALLNAME
+			    , CD_CALLRSRCCD
+			    , CD_CALLCOMMENT
+			    , CD_REFITEMID
+			    )
+			VALUES
+				( :pItemId
+				, :pSYSCD
+				, :pRSRCNAME
+				, :pCALLRsrcName
+				, :szRsrcCD
+				, :pCALLRsrcComment
+				, :pRefItem
+				);
+	}
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr, "CMD0204 등록 오류 : [%d] [%s]\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return (1);
+	}
+
+	return (0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Process_PFEffect                                 */
+/*	Action    : 프로프레임 영향도 자료 작성                      */
+/*	Parameter :	pSysCD    : 시스템코드                           */
+/*	            pRsrcType : 리소스타입                           */
+/*	            pPhyName  : 물리명(자원명)	                     */
+/*	            pEffCD    : 영향도구분 (T:테이블, R:리소스)      */
+/*	            pOutName  : 결과파일                             */
+/*	Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+int 	Process_PFEffect	( char *pSysCD
+							, char *pRsrcType
+							, char *pPhyName
+							, char *pEffCD
+							, char *pOutName
+							)
+{
+char 	szSysCD                [5+1];    /* 시스템코드           */
+char 	szOutName              [201];    /* 처리결과파일         */
+char	szRsrcType	            [51];
+char	szPhyName	           [201];
+char	szRefName	           [201];
+char	szEffCD                [1+1];
+int		retval                      ;
+int		nRet                        ;
+long	nFileSize                   ;
+int		Index_key                   ;
+char	szTmpPath	          [2048];
+char	szReturnFile          [2048];
+char	szErrFile             [2048];
+char 	szItemId              [12+1];    /* 프로그램ID           */
+char 	szRefItem             [12+1];    /* 프로그램ID           */
+char    szRefRsrcCd            [2+1];
+char	*toktmp                     ;
+char	*szKeys                  [5];
+char	*dummy                      ;    /* Read Buffer          */
+FILE    *SrcPtr                     ;
+
+    memset(szSysCD   , 0x00, sizeof(szSysCD   ));
+    memset(szRsrcType, 0x00, sizeof(szRsrcType));
+    memset(szPhyName , 0x00, sizeof(szPhyName ));
+    memset(szOutName , 0x00, sizeof(szOutName ));
+
+    sprintf(szSysCD   , "%s", pSysCD   );
+    sprintf(szRsrcType, "%s", pRsrcType);
+	sprintf(szPhyName , "%s", pPhyName );
+	sprintf(szEffCD   , "%s", pEffCD   );
+	sprintf(szOutName , "%s", pOutName );
+
+	SetTempDir("99", szTmpPath);
+	if (cmp_right_char(szTmpPath, 1, "/") != 0)
+		sprintf(szTmpPath, "%s/", szTmpPath);
+
+	sprintf(szReturnFile, "%s%s"    , szTmpPath, szOutName );
+	sprintf(szErrFile   , "%s%s.err", szTmpPath, szOutName );
+
+	/*-----------------------------------------------------------*/
+	/*	ProFrame_Call Parameter                                  */
+	/*		pCODE       : 구분                                   */
+	/*	    pSysCD      : 시스템코드                             */
+	/*	    szRsrcType    리소스명		                         */
+	/*	    szPhyName   : 물리명                                 */
+	/*	    szOutName   : 리스트파일                             */
+    /*-----------------------------------------------------------*/
+    
+    if (strcmp(szEffCD, "I") == 0) {
+		/*-------------------------------------------------------*/
+		/*	자원에 대한 디렉토리 코드 조회                       */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+			SELECT  A.CR_ITEMID
+			  INTO  :szItemId
+			  FROM  CMM0036 B,CMR0020 A
+			 WHERE  A.CR_SYSCD    = :szSysCD
+			   AND  A.CR_RSRCNAME = :szPhyName
+			   AND  A.CR_SYSCD  = B.CM_SYSCD
+			   AND  A.CR_RSRCCD = B.CM_RSRCCD
+			   AND  SUBSTR(B.CM_INFO,27,1)='1'
+			   AND  SUBSTR(B.CM_INFO,34,1)='1';
+
+		if (sqlca.sqlcode != 0) {
+			fprintf(stderr, "[%d] ITEMID READ ERROR : [%s] [%s]\n", sqlca.sqlcode, szSysCD, szPhyName);
+			remove (szReturnFile);
+			remove (szErrFile   );
+			return (1);
+		}
+
+		/*-------------------------------------------------------*/
+		/*	기존 데이터 삭제                                     */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+			DELETE  CMD0204
+			 WHERE  CD_ITEMID    = :szItemId
+			   AND  NVL(CD_HANDRUN, 'N') != 'Y';
+
+		retval = ProFrame_Call	( "INCLUDE_LIST"
+		                        , szSysCD
+							    , szPhyName
+							    , ""
+							    , szOutName);
+
+		if (retval != 0) {
+			remove (szReturnFile);
+			remove (szErrFile   );
+
+		    return (retval);
+		}
+
+
+		/*-------------------------------------------------------*/
+		/*		처리구분별 처리결과 체크                         */
+		/*-------------------------------------------------------*/
+	    if ((SrcPtr = fopen(szReturnFile, "r")) == (FILE *) NULL) {
+			fprintf(stderr, "%s 처리결과파일 OPEN 오류 [%s]\n", pSysCD, szReturnFile);
+			remove (szReturnFile);
+			remove (szErrFile   );
+			return (1);
+		}
+
+		nFileSize = FileSizeInf(szReturnFile) + 1;
+		dummy = (char *)malloc(nFileSize);
+		memset(dummy, 0x00, nFileSize);
+
+
+		/*-------------------------------------------------------*/
+		/*	조회된 테이블 CRUD 연관도 테이블에 저장              */
+		/*-------------------------------------------------------*/
+		while (fgets(dummy, nFileSize, SrcPtr) != (char *) NULL) {
+			sprintf(dummy, "%s", rep_char(dummy,"\n"  , ""));
+			sprintf(dummy, "%s", rep_char(dummy,"\r\n", ""));
+			sprintf(dummy, "%s", trunc_char(dummy));
+
+			Index_key = 0;
+			while(1) {
+				if (Index_key == 0) {
+					szKeys[Index_key % 3] = strtok_r(dummy, (char *)":", &toktmp);
+				}
+				else {
+					szKeys[Index_key % 3] = strtok_r(NULL , (char *)":", &toktmp);
+				}
+
+				if (szKeys[Index_key % 3] == NULL) {
+					break;
+				}
+
+				Index_key++;
+
+				if (Index_key % 3 == 0) {
+					printf("[%s] [%s] [%s] [%s] [%s] [%s]\n", szSysCD, szPhyName, szKeys[0], szKeys[1], szKeys[2], szKeys[3]);
+					EXEC SQL
+						SELECT  A.CR_RSRCCD,A.CR_ITEMID
+						  INTO  :szRefRsrcCd,:szRefItem
+						  FROM  CMM0036 B,CMR0020 A
+						 WHERE  A.CR_SYSCD    = :szSysCD
+						   AND  A.CR_RSRCNAME = :szKeys[1]
+						   AND  A.CR_SYSCD  = B.CM_SYSCD
+						   AND  A.CR_RSRCCD = B.CM_RSRCCD
+						   AND  SUBSTR(B.CM_INFO,27,1)='1';
+			
+					if (sqlca.sqlcode != 0) {
+						fprintf(stderr, "[%d] REF ITEMID Read Error : [%s] [%s]\n", sqlca.sqlcode, szSysCD, szKeys[1]);
+						remove (szReturnFile);
+						remove (szErrFile   );
+						return (1);
+					}
+					Effect_Insert_I (szItemId, szSysCD, szRefItem, szPhyName, szRefRsrcCd, szKeys[1], szKeys[2]);
+
+					EXEC SQL COMMIT;
+				}
+			}
+		}
+		fclose (SrcPtr);
+		free(dummy);
+    }
+	else {
+		/*-------------------------------------------------------*/
+		/*	자원에 대한 디렉토리 코드 조회                       */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+			SELECT  A.CR_ITEMID
+			  INTO  :szItemId
+			  FROM  CMM0036 B,CMR0020 A
+			 WHERE  A.CR_SYSCD    = :szSysCD
+			   AND  A.CR_RSRCNAME = :szPhyName
+			   AND  A.CR_SYSCD  = B.CM_SYSCD
+			   AND  A.CR_RSRCCD = B.CM_RSRCCD
+			   AND  SUBSTR(B.CM_INFO,27,1)='1'
+			   AND  SUBSTR(B.CM_INFO,34,1)='1';
+
+		if (sqlca.sqlcode != 0) {
+			fprintf(stderr, "[%d] ITEMID Read Error : [%s] [%s]\n", sqlca.sqlcode, szSysCD, szPhyName);
+			remove (szReturnFile);
+			remove (szErrFile   );
+			return (1);
+		}
+
+		/*-------------------------------------------------------*/
+		/*	기존 데이터 삭제                                     */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+			DELETE  CMD0201
+			 WHERE  CD_SYSCD     = :szItemId
+			   AND  NVL(CD_HANDRUN, 'N') != 'Y';
+
+
+		retval = ProFrame_Call	( "REFERRED_LIST"
+		                        , szSysCD
+							    , szPhyName
+							    , ""
+							    , szOutName);
+
+		if (retval != 0) {
+			remove (szReturnFile);
+			remove (szErrFile   );
+			printf("ProFrame_Call error [REFERRED_LIST][%s][%s][%d][%s] \n",szSysCD,szPhyName,retval,szOutName);
+		    return (retval);
+		}
+
+
+		/*-------------------------------------------------------*/
+		/*		처리구분별 처리결과 체크                         */
+		/*-------------------------------------------------------*/
+	    if ((SrcPtr = fopen(szReturnFile, "r")) == (FILE *) NULL) {
+			fprintf(stderr, "%s 처리결과파일 OPEN 오류 [%s]\n", pSysCD, szReturnFile);
+			remove (szReturnFile);
+			remove (szErrFile   );
+			return (1);
+		}
+
+		nFileSize = FileSizeInf(szReturnFile) + 1;
+		dummy = (char *)malloc(nFileSize);
+		memset(dummy, 0x00, nFileSize);
+
+
+		/*-------------------------------------------------------*/
+		/*	조회된 테이블 CRUD 연관도 테이블에 저장              */
+		/*-------------------------------------------------------*/
+		while (fgets(dummy, nFileSize, SrcPtr) != (char *) NULL) {
+			sprintf(dummy, "%s",rep_char(dummy,"\n"  , ""));
+			sprintf(dummy, "%s",rep_char(dummy,"\r\n", ""));
+			sprintf(dummy, "%s",trunc_char(dummy));
+            /*BIZ_MODULE:maad_rp_cnst_cnfr_upt:RP거래동의등록및해지:ob61001237:BIZ_MODULE:maba_mnrc_for_sbsc_cncl_proc:입금처리(청약취소용):ob61001090*/
+			Index_key = 0;
+			while(1) {
+				if (Index_key == 0) {
+					szKeys[Index_key % 4] = strtok_r(dummy, (char *)":", &toktmp);
+				}
+				else {
+					szKeys[Index_key % 4] = strtok_r(NULL , (char *)":", &toktmp);
+				}
+				if (szKeys[Index_key % 4] == NULL) {
+					break;
+				}
+
+				Index_key++;
+
+				if (Index_key % 4 == 0) {
+					printf("[%s] [%s] [%s] [%s] [%s] [%s] [%s]\n", szSysCD, szPhyName, szKeys[0], szKeys[1], szKeys[2], szKeys[3]);
+					sprintf(szRefName,"%s",szKeys[1]);
+					EXEC SQL
+						SELECT  A.CR_RSRCCD,A.CR_ITEMID
+						  INTO  :szRefRsrcCd,:szRefItem
+						  FROM  CMM0036 B,CMR0020 A
+						 WHERE  A.CR_SYSCD    = :szSysCD
+						   AND  A.CR_RSRCNAME = :szRefName
+						   AND  A.CR_SYSCD  = B.CM_SYSCD
+						   AND  A.CR_RSRCCD = B.CM_RSRCCD
+						   AND  SUBSTR(B.CM_INFO,27,1)='1';
+			
+					if (sqlca.sqlcode != 0) {
+						fprintf(stderr, "[%d][%s] REF ITEMID Read Error : [%s] [%s]\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, szSysCD, szRefName);
+						continue;
+					}
+						
+					Effect_Insert_R (szItemId, szSysCD, szRefItem, szPhyName, szRefRsrcCd, szRefName, szKeys[2], szKeys[3]);
+
+					EXEC SQL COMMIT;
+				}
+			}
+		}
+		fclose (SrcPtr);
+		free(dummy);
+	}
+
+	remove (szReturnFile);
+	remove (szErrFile   );
+    printf("return ok \n");
+	return (0);
+	
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

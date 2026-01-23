@@ -1,0 +1,453 @@
+/*--------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_cmm0070.pc                             │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ eCAMS Directory 등록                         │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 20                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*			  eCAMS Directory 등록 처리 M A I N                  */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char** envp)
+{
+char 	szSysCD                [dfSysCD];
+char	szSvrCD                [dfSvrCD];
+char 	szServerIP             [dfSvrIP];
+char 	szPath                   [dfDir];
+char 	szAgtDir                 [dfDir];
+char 	szSysOS                [dfSysOS];
+int 	szSvrSeqNo                      ;
+int 	szPortNo                        ;
+int 	nRst                            ;
+char 	szTempFile          [dfFullPath];
+char 	szBaseHome               [dfDir];
+char 	szDirHome                [dfDir];
+char 	szCommand           [dfFullPath];
+char    dummy                      [512];
+char 	szDsnCD                [dfDsnCD];
+char	szEditor              [dfEditor];
+int		nCnt                            ;
+short 	bFlag = 0                       ;
+CMD_INFO	CmdInfo                     ;
+FILE	*DIRPTR                         ;
+
+
+    if (argc != 6) {
+        printf ("usage : %s <시스템코드> <디렉토리> <서버구분> <서버주소> <사용자번호>\n", argv[0]);
+        exit (0);
+	}
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+    /*-----------------------------------------------------------*/
+    /*   Socket 초기화                                           */
+    /*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+
+    /*-----------------------------------------------------------*/
+    /*   파라미터 초기화                                         */
+    /*-----------------------------------------------------------*/
+	strcpy(szSysCD   , argv[1]);
+	strcpy(szPath    , argv[2]);
+	strcpy(szEditor  , argv[3]);
+	strcpy(szSvrCD   , argv[4]);
+	strcpy(szServerIP, argv[5]);
+
+	NotUseDataTruncate (szSysCD   , 0x20);
+	NotUseDataTruncate (szPath    , 0x20);
+	NotUseDataTruncate (szEditor  , 0x20);
+	NotUseDataTruncate (szSvrCD   , 0x20);
+	NotUseDataTruncate (szServerIP, 0x20);
+
+	/*-----------------------------------------------------------*/
+	/*	기준서버 홈 디렉토리 조회                                */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  b.CM_VOLPATH
+		  INTO  :szBaseHome
+		  FROM  CMM0030 a
+		      , CMM0031 b
+		 WHERE  a.CM_Syscd   = :szSysCD
+		   AND  a.CM_SysCd   = b.CM_SysCd
+		   AND  a.CM_DirBase = b.CM_SvrCd
+		   AND  b.CM_CmpSvr  = 'Y'
+		   AND  b.CM_SVRSTOP = 'N'
+		   AND  b.CM_CloseDt IS NULL;
+
+	if (sqlca.sqlcode != 0) {
+		printf("디렉토리기준서버 정보를 얻지 못하였습니다.[%d] \n",sqlca.sqlcode);
+		exit(1);
+	}
+
+	/*-----------------------------------------------------------*/
+	/*	기준서버 홈 디렉토리 조회                                */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_VOLPATH
+		      , CM_SEQNO
+		      , CM_PORTNO
+		      , CM_SYSOS
+		      , CM_DIR
+		  INTO  :szDirHome
+		  	  , :szSvrSeqNo
+		  	  , :szPortNo
+		  	  , :szSysOS
+		  	  , :szAgtDir
+		  FROM  CMM0031
+		 WHERE  CM_SYSCD = :szSysCD
+		   AND  CM_SYSCD = :szSvrCD
+		   AND  CM_SVRIP = :szServerIP
+		   AND  CM_SVRSTOP = 'N'
+		   AND  CM_CLOSEDT IS NULL;
+
+	if (sqlca.sqlcode != 0) {
+		printf("서버 정보를 얻지 못하였습니다.[%d] \n",sqlca.sqlcode);
+		exit(1);
+	}
+
+
+	NotUseDataTruncate (szDirHome, 0x20);
+	NotUseDataTruncate (szPath   , 0x20);
+	NotUseDataTruncate (szSysOS  , 0x20);
+	NotUseDataTruncate (szAgtDir , 0x20);
+
+	strcpy(CmdInfo.szServerIP, szServerIP);
+	CmdInfo.nPort = szPortNo;
+
+	/*-----------------------------------------------------------*/
+	/*	소켓 버퍼사이즈 SET                                    */
+	/*-----------------------------------------------------------*/
+	if (Server_Buff_Size(szSysCD, szSvrCD, szSvrSeqNo) == FALSE) {
+		printf("서버 정보를 얻지 못하였습니다.[%s] [%s] [%d]\n", szSysCD, szSvrCD, szSvrSeqNo);
+		exit(1);
+	}
+
+    if (strlen(szBaseHome) > 0) {
+    	if (cmp_right_char(szBaseHome, 1, "/") == 0)
+		   sprintf(szBaseHome,"%s", left_char(szBaseHome, strlen(szBaseHome) - 1));
+    }
+
+    if (strlen(szDirHome) > 0) {
+    	if (cmp_right_char(szDirHome, 1, "/") == 0)
+		   sprintf(szDirHome, "%s", left_char(szDirHome, strlen(szDirHome) - 1));
+    }
+    if (strcmp(szBaseHome,szDirHome) != 0) bFlag = 1;
+
+    if (strcmp(szSysOS, dfUNIX) == 0) {
+		/*-------------------------------------------------------*/
+		/*  파일 리스트 생성                                     */
+		/*-------------------------------------------------------*/
+		printf("파일리스트 생성중...\n");
+		strcpy(CmdInfo.szJobGub,"S");
+		sprintf(CmdInfo.szCommand,"ls -AR %s | grep / > %s/%s", szPath, szAgtDir,szEditor);
+		Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO  (&CmdInfo);
+	    if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			printf("디렉토리목록 작성에 실패하였습니다.[%s] \n",CmdInfo.szRstCond);
+			exit(1);
+		}
+
+		/*-------------------------------------------------------*/
+		/* 	생성 파일 GET                                        */
+		/*-------------------------------------------------------*/
+		strcpy(CmdInfo.szJobGub,"G");
+		sprintf(CmdInfo.szLocal ,"%s", szEditor);
+		sprintf(CmdInfo.szRemote,"%s/%s", szAgtDir,szEditor);
+		Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO  (&CmdInfo);
+
+		if(strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			printf("파일 리스트를 가져오지 못했습니다.[%s] \n",CmdInfo.szRstCond);
+			exit(1);
+		}
+
+		/*-------------------------------------------------------*/
+		/*	ls -lR 실행시 지정 디렉토리는 출력이 않되므로 추가   */
+		/*	시켜 줘야 함                                         */
+		/*-------------------------------------------------------*/
+		sprintf(szTempFile,"%s.tmp",CmdInfo.szLocal);
+		FILE * fp;
+		if ((fp = fopen(szTempFile,"w")) == NULL) {
+			printf("임시파일 생성 실패!\n");
+			exit(1);
+		}
+		fprintf(fp,"%s:\n",szPath);
+		fclose(fp);
+
+		sprintf(szCommand,"cat %s >> %s",CmdInfo.szLocal, szTempFile);
+		nRst = system(szCommand);
+		fprintf(stdout, "patch Rst = %d\n", nRst);
+		if (nRst != 0) {
+			fprintf(stderr, "파일리스트에 경로 추가 실패!\n");
+			exit(1);
+		}
+		else {
+		    sprintf(szCommand,"mv %s %s", szTempFile,CmdInfo.szLocal);
+		    nRst = system(szCommand);
+	    }
+	    remove(szTempFile);
+
+
+		/*-------------------------------------------------------*/
+		/* 	서버에 생성 파일 삭제                                */
+		/*-------------------------------------------------------*/
+		printf("서버에 생성 파일 삭제...\n");
+		strcpy(CmdInfo.szJobGub,"S");
+		sprintf(CmdInfo.szCommand,"rm -rf %s", szEditor);
+		Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO  (&CmdInfo);
+
+		printf("처리결과. [%s] \n",CmdInfo.szRstCond);
+
+	    if ((DIRPTR = fopen(szEditor, "r") ) == (FILE *) NULL) {
+	        exit (1);
+	    }
+
+	    memset(dummy, 0x00, sizeof(dummy));
+	    while (fgets(dummy, 256, DIRPTR) != (char *) NULL) {
+	        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+			sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			sprintf(dummy, "%s", rep_char(dummy,":",""));
+	        sprintf(dummy, "%s", trunc_char(dummy));
+
+			if (cmp_right_char(dummy,1, "/") == 0)
+				sprintf(dummy, "%s", left_char(dummy, strlen(dummy) - 1));
+
+			if (strlen(dummy) == 0)		continue;
+
+	        if (bFlag == 1) {
+	           if (strlen(szBaseHome) > 0)
+	              sprintf(dummy,"%s%s",szBaseHome, right_char(dummy, strlen(dummy) - strlen(szDirHome)));
+	        }
+
+	        EXEC SQL
+				SELECT  COUNT(*)
+				  INTO  :nCnt
+				  FROM  CMM0070
+				 WHERE  CM_Syscd   = :szSysCD
+				   AND  CM_DirPath = :dummy;
+
+			if (sqlca.sqlcode != 0)
+				nCnt = 0;
+
+			if (nCnt > 0)	continue;
+
+			EXEC SQL
+				SELECT  LPAD(NVL(MAX(CM_DSNCD), 0) + 1, 5, 0)
+				  INTO  :szDsnCD
+				  FROM  CMM0070
+				 WHERE  CM_SYSCD = :szSysCD;
+
+			EXEC SQL
+				INSERT INTO CMM0070
+					( CM_SYSCD
+					, CM_DSNCD
+					, CM_DIRPATH
+					, CM_EDITOR
+					, CM_OPENDT
+					, CM_LASTUPDT
+					, CM_CLSDT
+					, CM_RUNSTA
+					)
+				VALUES
+					( :szSysCD
+					, :szDsnCD
+					, :dummy
+					, :szEditor
+					, SYSDATE
+					, SYSDATE
+					, NULL
+					, '1'
+					);
+
+			EXEC SQL COMMIT;
+
+			if (sqlca.sqlcode == 0)
+				fprintf(stdout, "DIRECTORY INSERT SUCCESS : [%s] [%s] [%s]\n", szSysCD, szDsnCD, dummy);
+			else
+				fprintf(stdout, "DIRECTORY INSERT FAIL    : [%s] [%s] [%s]\n", szSysCD, szDsnCD, dummy);
+	    }
+
+	    fclose (DIRPTR);
+    }
+    else {
+        /*-------------------------------------------------------*/
+		/*  파일 리스트 생성                                     */
+		/*-------------------------------------------------------*/
+		sprintf(szPath, "%s", rep_char(szPath,"/","\\"));
+
+		printf("파일리스트 생성중...[%s]\n",szPath);
+		strcpy(CmdInfo.szJobGub,"S");
+		sprintf(CmdInfo.szCommand,"DIR /S %s > %s", szPath, szEditor);
+		Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO  (&CmdInfo);
+
+	    if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			printf("디렉토리목록 작성에 실패하였습니다.[%s] \n",CmdInfo.szRstCond);
+			exit(1);
+		}
+
+		/*-----------------------------------------------------------*/
+		/* 	생성 파일 GET                                            */
+		/*-----------------------------------------------------------*/
+		strcpy(CmdInfo.szJobGub,"G");
+		sprintf(CmdInfo.szLocal ,"%s", szEditor);
+		sprintf(CmdInfo.szRemote,"%s/%s",szAgtDir,szEditor);
+		Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO  (&CmdInfo);
+
+		if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			printf("파일 리스트를 가져오지 못했습니다.[%s] \n",CmdInfo.szRstCond);
+			exit(1);
+		}
+
+		/*-------------------------------------------------------*/
+		/* 	서버에 생성 파일 삭제                                */
+		/*-------------------------------------------------------*/
+		printf("서버에 생성 파일 삭제...\n");
+		strcpy(CmdInfo.szJobGub,"S");
+		sprintf(CmdInfo.szCommand,"DEL /F %s", szEditor);
+		Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO  (&CmdInfo);
+
+		printf("처리결과. [%s] \n",CmdInfo.szRstCond);
+
+	    if ((DIRPTR = fopen(szEditor, "r") ) == (FILE *) NULL) {
+			exit (1);
+	    }
+
+	    memset(dummy, 0x00, sizeof(dummy));
+
+	    while (fgets(dummy, 256, DIRPTR) != (char *) NULL) {
+	        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+			sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+	        sprintf(dummy, "%s", trunc_char(dummy));
+
+	        if (Char_Check(dummy,"\\") >= 0) {
+	            NotUseDataTruncate (dummy, 0x20);
+
+				if (cmp_right_char(dummy, 1, "\\") == 0)
+					sprintf(dummy, "%s", left_char(dummy, strlen(dummy) - 1));
+
+				if (strlen(dummy) == 0)		continue;
+
+		        if (bFlag == 1) {
+		           if (strlen(szBaseHome) > 0)
+		              sprintf(dummy,"%s%s",szBaseHome, right_char(dummy, strlen(dummy) - strlen(szDirHome)));
+		        }
+
+		        EXEC SQL
+					SELECT  COUNT(*)
+					  INTO  :nCnt
+					  FROM  CMM0070
+					 WHERE  CM_Syscd   = :szSysCD
+					   AND  CM_DirPath = :dummy;
+
+				if (sqlca.sqlcode != 0)
+					nCnt = 0;
+
+				if (nCnt > 0)	continue;
+
+				EXEC SQL
+					SELECT  LPAD(NVL(MAX(CM_DSNCD), 0) + 1, 5, 0)
+					  INTO  :szDsnCD
+					  FROM  CMM0070
+					 WHERE  CM_SYSCD = :szSysCD;
+
+				EXEC SQL
+					INSERT INTO CMM0070
+						( CM_SYSCD
+						, CM_DSNCD
+						, CM_DIRPATH
+						, CM_EDITOR
+						, CM_OPENDT
+						, CM_LASTUPDT
+						, CM_CLSDT
+						, CM_RUNSTA
+						)
+					VALUES
+						( :szSysCD
+						, :szDsnCD
+						, :dummy
+						, :szEditor
+						, SYSDATE
+						, SYSDATE
+						, NULL
+						, '1'
+						);
+
+				EXEC SQL COMMIT;
+
+				if (sqlca.sqlcode == 0)
+					fprintf(stdout, "DIRECTORY INSERT SUCCESS : [%s] [%s] [%s]\n", szSysCD, szDsnCD, dummy);
+				else
+					fprintf(stdout, "DIRECTORY INSERT FAIL    : [%s] [%s] [%s]\n", szSysCD, szDsnCD, dummy);
+		    }
+	    }
+	    fclose (DIRPTR);
+    }
+    remove (szEditor);
+    printf("디렉토리작성작업 완료. \n");
+
+    EXEC SQL
+		INSERT INTO CMR9910
+			( CR_CONUSR
+			, CR_SENDDATE
+			, CR_STATUS
+			, CR_SENDUSR
+			, CR_SGNMSG
+			, CR_ACPTNO
+			)
+		SELECT :szEditor
+			 , SYSDATE
+			 , '0'
+			 , :szEditor
+			 , '[' || CM_SYSMSG || ']에 대한 디렉토리목록작성이 완료되었습니다.'
+			 ,  TO_CHAR(SYSDATE,'YYMMDDHH24MISS')
+		 FROM  CMM0030
+		WHERE  CM_SYSCD = :szSysCD;
+
+	EXEC SQL COMMIT WORK RELEASE;
+
+	exit(0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

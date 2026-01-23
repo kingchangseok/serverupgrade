@@ -1,0 +1,66 @@
+
+Pro*C/C++: Release 11.2.0.4.0 - Production on Tue Jul 12 10:59:32 2016
+
+Copyright (c) 1982, 2011, Oracle and/or its affiliates.  All rights reserved.
+
+Error at line 0, column 0 in file FileRead_asiscmr0025.pc
+PCC-F-02102, Fatal error while doing C preprocessing
+Error at line 19, column 10 in file FileRead_asiscmr0025.pc
+    19  #include        <ecamsapi.h>
+    19  .........1
+    19  PCC-S-02015, unable to open include file
+Error at line 20, column 11 in file FileRead_asiscmr0025.pc
+    20  #include        <ecams_util.h>
+    20  ..........1
+    20  PCC-S-02015, unable to open include file
+Error at line 23, column 1 in file FileRead_asiscmr0025.pc
+    23  EXEC SQL INCLUDE "ecams_acct.h";
+    23  1
+    23  PCC-S-02015, unable to open include file
+Error at line 26, column 6 in file FileRead_asiscmr0025.pc
+    26  FILE *fp;
+    26  .....1
+    26  PCC-S-02201, Encountered the symbol "*" when expecting one of the follo
+        wing:
+        
+           ; , = ( [
+        The symbol ";" was substituted for "*" to continue.
+        
+Error at line 53, column 15 in file FileRead_asiscmr0025.pc
+    53      static vr my_vr;
+    53  ..............1
+    53  PCC-S-02201, Encountered the symbol "my_vr" when expecting one of the f
+        ollowing:
+        
+           ; , = ( [
+        The symbol "," was substituted for "my_vr" to continue.
+        
+Error at line 56, column 6 in file FileRead_asiscmr0025.pc
+    56  FILE *fp;
+    56  .....1
+    56  PCC-S-02201, Encountered the symbol "*" when expecting one of the follo
+        wing:
+        
+           ; , = ( [
+        The symbol ";" was substituted for "*" to continue.
+        
+Error at line 235, column 34 in file FileRead_asiscmr0025.pc
+   235          fwrite(my_vr.arr,(size_t)amount,(size_t)1,fp);
+   235  .................................1
+   235  PCC-S-02201, Encountered the symbol "amount" when expecting one of the 
+        following:
+        
+           , = ( ) [ * ? | & < > + - / % . ^ *= /= %= += -= <<= >>= &&=
+           ||= ^= | & == != <= >= << >> ++ -- ->
+        The symbol "," was substituted for "amount" to continue.
+        
+Error at line 235, column 49 in file FileRead_asiscmr0025.pc
+   235          fwrite(my_vr.arr,(size_t)amount,(size_t)1,fp);
+   235  ................................................1
+   235  PCC-S-02201, Encountered the symbol "1" when expecting one of the follo
+        wing:
+        
+           , = ( ) [ * ? | & < > + - / % . ^ *= /= %= += -= <<= >>= &&=
+           ||= ^= | & == != <= >= << >> ++ -- ->
+        The symbol "," was substituted for "1" to continue.
+        

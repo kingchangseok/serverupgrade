@@ -1,0 +1,330 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_mgr.pc                                 │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ eCAMS 처리 MAIN                              │
+ │            │ MASTER TABLE을 검색하여 처리대상을 O아 대상 │
+ │            │ 처리프로그램을 fork                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 12                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain	1
+
+#include 	<ecamsapi.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+  char      gAcptNo             [16];  /* 접수 번호              */
+  int       gSerNo                  ;  /* 일련 번호              */
+  char      p_ConfTeam          [40];  /* 처리 단계              */
+  char      p_SysFc1             [3];  /* 체크아웃구분           */
+  char      gQryCD               [5];  /* 신청 구분              */
+  char      gAgentDtTime        [20];  /* Agent Check Date/Time  */
+  int       gAgentMM                ;  /* Agent Check 경과시간   */
+EXEC SQL END DECLARE SECTION;
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+void	NotUseDataTruncate     	(char *, int   );
+void	DefineParentSignal     	(void  );
+void	ExitParentProc         	(int   );
+
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+#ifdef _OSF_SOURCE
+static  void sig_cld         (void);
+#endif
+
+char   	**gEnvp                 ;
+char    systime [16], sysdate [16];    /* 현재일자, 시간         */
+char 	MyLog   [5000];                /* debug 로그 내용        */
+int 	bLog          ;                /* debugging 여부         */
+char    szSysGbn        [5];           /* 시스템구분 TEST,REAL               */
+
+#define	_AgtLimit   10
+
+
+/*---------------------------------------------------------------*/
+/*    Log 기록용 변수                                            */
+/*---------------------------------------------------------------*/
+int		totforkcnt                      ;
+int		forkmaxnum                      ;
+char	szSysCD                [dfSysCD];
+char    szTempTime                   [4+1];
+int   nSendFlag = FALSE;
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : Restart_Process                                    */
+/*	Action    : 요일별/시간별 처리여부 Check                     */
+/*  Parameter : 없슴                                             */
+/*  Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void 	Restart_Process	( void
+						)
+{
+EXEC SQL BEGIN DECLARE SECTION;
+char	Bef2Mon                     [10]; /* 2개월전 일자        */
+char	issunday                    [10];
+char	cmpAgntDt                   [10];
+char	syscmd                    [2048];
+char	chkdate                   [10+1];
+char	chktime                   [10+1];
+char	szDelcd                   [10+1];
+char	szTmpPath                [dfDir];
+int 	Log_Del_Jugi                    ;
+char	szTarIp                [dfSvrIP];
+int		szTarPort                       ;
+int		fetchcnt                        ;
+int     diffcnt                         ;
+int     ret                             ;
+char	szBackPath               [dfDir];
+char	szBinPath                [dfDir];
+char	szGbnCD                    [2+1];
+char	col_USERID            [dfEditor];
+int 	col_BLKSEQ                      ;
+char    diffSys                      [6];
+char    diffSvrIp                   [20];
+char    diffSysDay                   [9];
+char    sysPath                  [dfDir];
+char    sysPathCd                    [3];
+char    sysDayYYYY                   [5];
+char    sysDayMM                     [3];
+char    szUserId                     [20];
+char    szLockBaseDt                 [5+1];
+char    szLogHisP                    [5+1];
+char    szDeplyTime                  [4+1];
+/*char    szTempTime                   [2+1];*/
+int     dSeq                            ;
+int     srmCnt                          ;
+char   szReqdate        [8+1];
+int   szReqNew       ;
+int   szReqMod       ;
+int   szReqNom       ;
+int   szReqDel         ;
+int   nLockDay      ;
+int   nSaveTerm     ;
+int   nFlag = 0;
+int   nCount = 0;
+
+
+
+EXEC SQL END DECLARE SECTION;
+/*
+	printf("MGR  Restart_Process() START ==================== \n");
+*/
+		memset(chktime, 0x00, sizeof(chktime));
+		memset(chkdate, 0x00, sizeof(chkdate));
+		
+		Get_Sys_Date(chkdate);
+		Get_Sys_Time(chktime);
+		
+    if ( memcmp(chkdate, gszLogFile, 8) != 0 ) {
+        Get_Sys_Date(gszLogFile);
+        strcat(gszLogFile,".log");
+        strcpy(gszLogPath,"LogMessage/");
+    }
+    
+		printf ( "JEUS TEST CHKTIME[%s]\n", chktime);
+
+/*		
+		if (( memcmp(chktime, "0655", 4) == 0  ||
+		      memcmp(chktime, "0855", 4) == 0  ||
+		      memcmp(chktime, "1255", 4) == 0  ||
+		      memcmp(chktime, "1755", 4) == 0  ||
+		      memcmp(chktime, "1855", 4) == 0 )  && 
+		      nSendFlag == FALSE ){
+
+	     memset ( syscmd, 0x00, sizeof(syscmd));
+	     sprintf ( syscmd, "sendmsg.sh");
+	     	 
+	     ret = system(syscmd)/256;
+
+       *LOG*sprintf(gszLogMsg,"[JEUS MGR] sendmsg.sh Program Start[Deploy 5Min Before] [%s][%d]\n", syscmd,ret );
+       eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg); 
+       
+       nSendFlag = TRUE; 
+	     		   
+		}
+*/		     
+
+		EXEC SQL
+		  SELECT CM_CODENAME 
+		    INTO :szDeplyTime
+		    FROM CMM0020
+		   WHERE CM_MACODE ='SYSTIME'
+		     AND CM_CODENAME = SUBSTR(:chktime, 0,4);
+		
+		
+		
+		if ( sqlca.sqlcode == 0 ) {
+		   NotUseDataTruncate (szDeplyTime     , 0x20);
+/* 2017.01.18 */
+			 EXEC SQL
+			    SELECT COUNT(*) 
+			      INTO :nCount
+			      FROM CMR1000
+			     WHERE CR_STATUS not in ('3', '8', '9');
+/*			       AND CR_PRCTIME = :szDeplyTime;*/
+			       
+       /*LOG*/sprintf(gszLogMsg,"[JEUS MGR] [%s][%s][%d]Restart Pgm before 0 ",szTempTime,szDeplyTime,nCount);
+       eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+
+		   if ( nCount > 0 ) {  
+   	      /*LOG*/sprintf(gszLogMsg,"[JEUS MGR] [%s][%s][%d]Restart Pgm before 1",szTempTime,szDeplyTime,nCount);
+          eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+		      if ( memcmp ( szTempTime, szDeplyTime, 4 ) != 0 ) {  
+             if ( memcmp(chkdate, gszLogFile, 8) != 0 ) {
+                 Get_Sys_Date(gszLogFile);
+                 strcat(gszLogFile,".log");
+                 strcpy(gszLogPath,"LogMessage/");
+             }
+
+	           memset ( syscmd, 0x00, sizeof(syscmd));
+	           sprintf ( syscmd, "sendmsg.sh");
+	           	 
+	           ret = system(syscmd)/256;
+             
+             /*LOG*/sprintf(gszLogMsg,"[JEUS MGR] sendmsg.sh Program Start[Deploy 5Min Before] [%s][%d]\n", syscmd,ret );
+             eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg); 
+
+				     memset ( syscmd, 0x00, sizeof(syscmd));
+		  	     
+		  	     printf ( " ecams_jeusstart start\n");
+		  	     sprintf ( syscmd, "ecams_jeusstart %s %s" , chkdate, szDeplyTime);
+		  	
+		  	     ret = system(syscmd)/256;
+
+		  	     /*LOG*/sprintf(gszLogMsg,"[JEUS MGR] [%s][%s][%d]Restart Pgm ecams_jeusstart  end",szTempTime,szDeplyTime,nCount);
+             eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	           strcpy (szTempTime, szDeplyTime);
+		      }	
+       } 
+       nSendFlag = FALSE;
+
+   }
+   
+}
+
+/*---------------------------------------------------------------*/
+/*     Parent  Signal  Define                                    */
+/*---------------------------------------------------------------*/
+void DefineParentSignal ()
+{
+    int sig_num;
+
+    for (sig_num = 1; sig_num < 32; sig_num++)
+         signal (sig_num,  SIG_IGN);
+
+#ifdef _OSF_SOURCE
+    signal (SIGCLD, sig_cld);
+#else
+    signal (SIGCHLD, SIG_IGN);
+#endif
+
+    signal (SIGBUS,  ExitParentProc);
+    signal (SIGSEGV, ExitParentProc);
+    signal (SIGSYS,  ExitParentProc);
+    signal (SIGKILL, ExitParentProc);
+    signal (SIGINT,  ExitParentProc);
+    signal (SIGTERM, ExitParentProc);
+
+    return;
+}
+
+#ifdef _OSF_SOURCE
+static void sig_cld ()
+{
+    int pid, status;
+
+    while ((pid = wait3 (&status, WNOHANG, (struct rusage *)0)) > 0)
+        ;
+}
+#endif
+
+
+void ExitParentProc (sig_num)
+int sig_num;
+{
+    exit (0);
+}
+
+
+/*****************************************************************/
+/*                                                               */
+/*       eCAMS_MGR  처리 MAIN  LOGIC                             */
+/*                                                               */
+/*****************************************************************/
+int		main(int argc, char **argv, char **envp)
+{
+char  	SysCmd                     [100]; /* 시스템 명령문       */
+char    stime                       [16]; /* 처리시작, 종료 시간 */
+char    etime                       [16]; /* 처리시작, 종료 시간 */
+char    Bef2Mon                     [10]; /* 3개월전 일자        */
+int		ncnt = 0                        ;
+
+    memset(szSysGbn  , 0x00, sizeof(szSysGbn  ));
+	  memset ( szTempTime, 0x00, sizeof( szTempTime));
+  	
+  
+	/*-----------------------------------------------------------*/
+	/*	Jeus Restart Process                                     */
+	/*-----------------------------------------------------------*/
+	
+	
+
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");
+
+	Get_Sys_Date (sysdate);
+
+	ncnt = system("procck ecams_jeusmgr") / 256;
+	if (ncnt > 1)
+		exit (1);
+		
+    /*LOG*/sprintf(gszLogMsg,"[JEUS MGR] [%s][%s]Restart ecams_jeusstart start",gszLogPath,gszLogFile);
+    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+    gEnvp = envp;
+    if (ConnectDB() == FALSE) {
+   	  fprintf (stderr, "SQL ERROR  Connect \n");
+      exit(0);
+    }
+
+	  DefineParentSignal ();
+
+    memset(gAgentDtTime, 0x00, sizeof(gAgentDtTime));
+    while (1) {
+
+
+	    Restart_Process ();
+	    sleep(5);
+	    
+    }
+    EXEC SQL COMMIT WORK RELEASE;
+    exit(0);
+}
+
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

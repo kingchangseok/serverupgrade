@@ -1,0 +1,966 @@
+/*-----------------------------------------------------------------
+
+ ┌──────┬───────────────────────┐
+
+ │ 프로그램명 │ getSvrList.pc   │
+
+ └──────┴───────────────────────┘
+
+-----------------------------------------------------------------*/
+
+
+
+#define DEBUG 1
+
+#define	dfMain	1
+
+/*---------------------------------------------------------------*/
+
+/*     Header files                                              */
+
+/*---------------------------------------------------------------*/
+
+#include	<ecamsapi.h>
+
+#include 	<ecams_util.h>
+
+
+
+
+
+#define WIN  0
+
+#define UNIX 1
+
+
+
+
+
+EXEC SQL INCLUDE SQLCA;
+
+
+
+
+
+/*---------------------------------------------------------------*/
+
+/*		전역변수 			                                     */
+
+/*---------------------------------------------------------------*/
+
+char   **gEnvp;			/*환경 변수    */
+
+char gszLogFile[50];	/*Log File Name*/
+
+char gszLogPath[100];	/*Log File Path*/
+
+char gszLogMsg[512];	/*Log Message  */
+
+char gszTempPath[100];	/*Temp Direcotry*/
+
+
+
+
+
+int write_file(char *pFileName, char *pbuf);
+
+
+
+int 	ConnectDB();
+
+
+
+/*****************************************************************/
+
+/*                                                               */
+
+/*      자원이행 처리  M A I N                                   */
+
+/*                                                               */
+
+/*****************************************************************/
+
+int 	main(int argc, char *argv[])
+
+{
+
+	char szAcptNo[13];
+
+	int	 szSerNo;
+
+	char szSysCD[6];
+
+	char szSvrIP[20];
+
+	int	 szPortNo;
+
+	char szSvrCD[3];
+
+	int	 szSvrSeq;
+
+	char szSvrName[51];
+
+	char szListName[512];
+
+	char szListNameTmp[512];
+
+	char szListFile[512];
+
+	char szRstFile[512];
+
+	
+
+	
+
+	char szDsnCD[11];
+
+	char szType[4];
+
+	char szJobCD[6];
+
+	char szRsrcName[512];
+
+	char szItemID[13];
+
+	char szAgentDir[512];
+
+	char szSysOS[3];
+
+	char szSystemType[2];
+
+	char szRunGbn[2];
+
+	int	 szGrpNo;
+
+	
+
+	
+
+	CMD_INFO	  CmdInfo;
+
+	
+
+	char szVolPath[512];
+
+	char szApSvr[100];
+
+	char szExeName[512];
+
+	char szRstCond[5];
+
+	
+
+	
+
+	char szListRemote[512];
+
+	char szListLocal[512];
+
+	char szRstMsg[512];
+
+	
+
+	char dummy[2048];
+
+
+
+	FILE *fptr1,*fptr2;
+
+	
+
+	struct stat f_st;
+
+	
+
+	
+
+	char readbuf[2048];
+
+	
+
+	
+
+	int	nRet;
+
+	int	readcnt;
+
+	int	writecnt;
+
+	
+
+	char	*szKeys[512];
+
+	int		Index_key=0;
+
+	char	*toktmp;
+
+
+
+
+
+	char 	writebuf[512];
+
+	
+
+	int		returnval;
+
+	int 	i;
+
+	
+
+		
+
+	if (argc < 12) {
+
+        printf ("Usage : %s <ACPTNO> <szSerNo> <SYSCD> <SVRIP> <SVRCD> <SVRSEQ> <SVRNAME> <szListName> <szRstFile> <szRunGbn> \n", argv[0]);
+
+        exit (1);
+
+    }
+
+	    
+
+    
+
+    memset(szAcptNo   , 0x00, sizeof(szAcptNo));
+
+    memset(szSvrIP , 0x00, sizeof(szSvrIP ));
+
+    memset(szSysCD , 0x00, sizeof(szSysCD ));
+
+    memset(szSvrCD , 0x00, sizeof(szSvrCD ));
+
+    memset(szListName , 0x00, sizeof(szListName ));
+
+    memset(szRstFile , 0x00, sizeof(szRstFile ));
+
+    memset(szRstMsg , 0x00, sizeof(szRstMsg ));
+
+     
+
+    sprintf(szAcptNo   , "%s", argv[1]);
+
+    szSerNo = atoi(argv[2]);
+
+    sprintf(szSysCD , "%s", argv[3]);
+
+    sprintf(szSvrIP , "%s", argv[4]);
+
+	sprintf(szSvrCD , "%s", argv[5]);
+
+	szSvrSeq = atoi(argv[6]);
+
+	szGrpNo = atoi(argv[7]);
+
+	sprintf(szSvrName , "%s", argv[8]);
+
+	sprintf(szListName , "%s", argv[9]);
+
+	sprintf(szRstFile , "%s", argv[10]);
+
+	sprintf(szRunGbn , "%s", argv[11]);
+
+	
+
+
+
+	
+
+
+
+	Get_Sys_Date(gszLogFile);
+
+	strcat(gszLogFile,".log");
+
+	strcpy(gszLogPath,"LogMessage/");
+
+	
+
+	InitCmdInfo(&CmdInfo);
+
+	strcpy(CmdInfo.szAcptNo,szAcptNo);
+
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);		
+
+
+
+	
+
+	
+
+	/*-----------------------------------------------------------*/
+
+    /*   Signal Define			                                 */
+
+    /*-----------------------------------------------------------*/
+
+    DefineSignal ();
+
+
+
+    /*-----------------------------------------------------------*/
+
+    /*   eCAMS  DB Server  Connect                               */
+
+    /*-----------------------------------------------------------*/
+
+	if(ConnectDB() == FALSE)
+
+		exit(1);
+
+		
+
+		
+
+	SetTempDir("99", gszTempPath);
+
+					
+
+	
+
+	
+
+	EXEC SQL
+
+		SELECT A.CR_DSNCD, decode(A.CR_RSRCCD,'01','SVC','02','BATCH','03','MOD','04','MOD','07','DEMON','17','DEMON','DAM') as stype, A.CR_JOBCD,
+
+			   A.CR_RSRCNAME, A.CR_ITEMID, B.CM_PORTNO, B.CM_VOLPATH, B.CM_DIR, B.CM_SYSOS,decode(b.cm_SYSCD,'00001','B','00002','O','X') as systemType
+
+		INTO :szDsnCD, :szType, :szJobCD, :szRsrcName, :szItemID, :szPortNo, :szVolPath,
+
+			 :szAgentDir, :szSysOS, :szSystemType
+
+		FROM CMR1010 A, CMM0031 B, CMM0038 C
+
+		WHERE A.CR_ACPTNO = :szAcptNo
+
+		AND	  A.CR_SERNO  = :szSerNo
+
+		AND	  B.CM_SVRCD  = :szSvrCD
+
+		AND	  B.CM_SEQNO  = :szSvrSeq
+
+		AND	  B.CM_SVRIP  = :szSvrIP
+
+		AND	  NVL(B.CM_GRPNO,1)  = :szGrpNo
+
+		AND	  A.CR_SYSCD  = B.CM_SYSCD
+
+		AND	  C.CM_SYSCD  = B.CM_SYSCD
+
+		AND	  C.CM_SVRCD  = B.CM_SVRCD
+
+		AND	  C.CM_SEQNO  = B.CM_SEQNO
+
+		AND	  A.CR_RSRCCD = C.CM_RSRCCD;
+
+		
+
+
+
+	if (sqlca.sqlcode != 0) {
+
+		sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB 정보 오류 [%d][%s]", szAcptNo,szSerNo,szSvrIP,
+
+															szSvrSeq,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+		
+
+		sprintf(szRstCond,"EROR");
+
+		
+
+		Result_Make(szRstFile,"SYSCB 정보 오류",szSvrIP,"SYSCB",szRstCond);
+
+		CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);		
+
+		
+
+		exit (1);
+
+	}
+
+	
+
+	NotUseDataTruncate (szDsnCD,		0x20);
+
+	NotUseDataTruncate (szType,		0x20);
+
+	NotUseDataTruncate (szJobCD,		0x20);
+
+	NotUseDataTruncate (szRsrcName,		0x20);
+
+	NotUseDataTruncate (szVolPath,		0x20);
+
+	NotUseDataTruncate (szAgentDir,   0x20);
+
+	NotUseDataTruncate (szSysOS,   0x20);
+
+	NotUseDataTruncate (szSystemType,   0x20);
+
+	NotUseDataTruncate (szItemID,   0x20);
+
+	
+
+	sprintf(szListNameTmp,"%s.tmp",szListName);
+
+	sprintf(szListFile,"%s/%s",gszTempPath,szListName);
+
+		
+
+	nRet = Char_Check(szVolPath+1,"/");
+
+	
+
+	if (nRet >= 0){
+
+		strncpy(szApSvr,szVolPath+1,nRet);
+
+	}
+
+	else{
+
+		strcpy(szApSvr,szVolPath+1);
+
+	}
+
+	
+
+	nRet = Right_Char_Check(szRsrcName,'.');
+
+	
+
+	if (nRet >=0){
+
+		sprintf(szExeName,"%s",left_char(szRsrcName,nRet - 1));
+
+	}
+
+	else{
+
+		sprintf(szExeName,"%sx",szRsrcName);
+
+	}	
+
+		
+
+	strcpy(CmdInfo.szServerIP, szSvrIP);
+
+	CmdInfo.nPort = szPortNo;
+
+	strcpy(CmdInfo.szJobGub,"S");
+
+	/*
+
+	if (strcmp(szSysOS, "03") == 0 ){
+
+		sprintf(CmdInfo.szCommand,"prd_getSvrList SVR %s %s > %s\\ecamsagent\\%s ",szType,szExeName,szAgentDir,szListNameTmp);
+
+	}
+
+	else{
+
+		sprintf(CmdInfo.szCommand,"prd_getSvrList SVR %s %s > %s/%s ",szType,szExeName,szAgentDir,szListNameTmp);
+
+	}
+
+	*/
+
+	
+
+   sprintf(gszLogMsg, "123123 [%s][%s][%s] prg_getSvrList  123132 ", szSystemType,szType,szExeName);
+
+   eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+   
+
+	if (strcmp(szSysOS, "03") == 0 ){
+
+		if (cmp_mid_char(szAcptNo, 5, 2,"03") == 0) {
+
+			sprintf(CmdInfo.szCommand,"tst_getSvrList %s %s %s > %s\\ecamsagent\\%s ",szSystemType,szType,szExeName,szAgentDir,szListNameTmp);
+
+		} else{
+
+			sprintf(CmdInfo.szCommand,"prd_getSvrList %s %s %s > %s\\ecamsagent\\%s ",szSystemType,szType,szExeName,szAgentDir,szListNameTmp);
+
+		}
+
+	}
+
+	else{
+
+		if (cmp_mid_char(szAcptNo, 5, 2,"03") == 0) {
+
+			sprintf(CmdInfo.szCommand,"tst_getSvrList %s %s %s > %s/%s ",szSystemType,szType,szExeName,szAgentDir,szListNameTmp);
+
+		} else{
+
+			sprintf(CmdInfo.szCommand,"prd_getSvrList %s %s %s > %s/%s ",szSystemType,szType,szExeName,szAgentDir,szListNameTmp);
+
+		}
+
+	}
+
+	sprintf(gszLogMsg, "[%s] getSvrList CALLINFO [%s]", szAcptNo,CmdInfo.szCommand);
+
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	
+
+	sprintf(szRstMsg,"prd_getSvrList fail [%s]",CmdInfo.szCommand);
+
+	Server_Cmd_JOB(&CmdInfo);
+
+	
+
+	if(strcmp(CmdInfo.szRstCond,"0000") != 0){
+
+		sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB prd_getSvrList 호출 실패 [%s][%s]", szAcptNo,szSerNo,szSvrIP,
+
+															szSvrSeq,CmdInfo.szRstCond,CmdInfo.szCommand);
+
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+		
+
+		sprintf(szRstCond,CmdInfo.szRstCond);
+
+		sprintf(szRstMsg,"[prd_getSvrList 호출 실패] %s",CmdInfo.szCommand);
+
+		Result_Make(szRstFile,szRstMsg,szSvrIP,"SYSCB",szRstCond);
+
+		CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);
+
+	    exit(1);	
+
+	}
+
+	
+
+	
+
+	/*-----------------------------------------------------------*/
+
+	/* 	생성 파일 GET                                            */
+
+	/*-----------------------------------------------------------*/
+
+
+
+	if (strcmp(szSysOS, "03") == 0 ){
+
+		sprintf(szListRemote,"%s\\ecamsagent\\%s",szAgentDir,szListNameTmp);
+
+	}
+
+	else{
+
+		sprintf(szListRemote,"%s/%s",szAgentDir,szListNameTmp);
+
+	}	
+
+	
+
+	sprintf(szListLocal,"%s/%s",gszTempPath,szListNameTmp);
+
+	
+
+	
+
+
+
+	strcpy(CmdInfo.szJobGub,"G");
+
+	sprintf(CmdInfo.szLocal,"%s",szListLocal);
+
+	sprintf(CmdInfo.szRemote,"%s",szListRemote);
+
+	
+
+	Server_Cmd_JOB(&CmdInfo);
+
+	
+
+	
+
+	stat(szListLocal, &f_st);
+
+	
+
+	
+
+	if(strcmp(CmdInfo.szRstCond,"0000") != 0 || f_st.st_size == 0 )
+
+	{
+
+		sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB 파일리스트 수신 실패 [%s][%s][%s]", szAcptNo,szSerNo,szSvrIP,
+
+															szSvrSeq,CmdInfo.szRstCond,CmdInfo.szRemote,CmdInfo.szLocal);
+
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+		
+
+		sprintf(szRstCond,CmdInfo.szRstCond);
+
+		
+
+		Result_Make(szRstFile,"SYSCB 파일리스트 수신 실패",szSvrIP,"SYSCB",szRstCond);
+
+		CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);
+
+		exit (1);
+
+	}
+
+	
+
+	strcpy(CmdInfo.szJobGub,"S");
+
+	if (strcmp(szSysOS, "03") == 0 ){
+
+		sprintf(CmdInfo.szCommand,"DEL /F %s",szListRemote);
+
+	}
+
+	else{
+
+		sprintf(CmdInfo.szCommand,"rm -rf %s",szListRemote);
+
+	}
+
+	Server_Cmd_JOB(&CmdInfo);		
+
+	
+
+	/*-----------------------------------------------------------*/
+
+	/*		처리구분별 처리결과 체크                             */
+
+	/*-----------------------------------------------------------*/
+
+    if ((fptr1 = fopen(szListLocal, "r")) == (FILE *) NULL) {
+
+		sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB 파일리스트 Read Fail [%s]", szAcptNo,szSerNo,szSvrIP,
+
+															szSvrSeq,szListLocal);
+
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+		
+
+		sprintf(szRstCond,"EROR");
+
+		
+
+		Result_Make(szRstFile,"SYSCB 파일리스트 Read Fail",szSvrIP,"SYSCB",szRstCond);
+
+		CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);
+
+		exit (1);
+
+	}
+
+	
+
+
+
+	readcnt = 0;
+
+	writecnt = 0;
+
+	
+
+	
+
+	while (fgets(dummy, 2048, fptr1) != (char *) NULL) {
+
+		readcnt++;
+
+		
+
+		sprintf(dummy,"%s",rep_char(dummy,"\r\n",""));
+
+		sprintf(dummy,"%s",rep_char(dummy,"\n",""));
+
+		sprintf(dummy,"%s",trunc_char(dummy));
+
+		
+
+		if ( Char_Check(dummy,":") < 0){
+
+			continue;
+
+		}
+
+		
+
+		memset(readbuf,0x00,sizeof(readbuf));
+
+		strcpy(readbuf,dummy);
+
+					
+
+		Index_key = 0;
+
+		while(1){
+
+			if (Index_key == 0)
+
+				szKeys[Index_key] = strtok_r(readbuf,":",&toktmp);
+
+			else
+
+				szKeys[Index_key] = strtok_r(NULL,":",&toktmp);
+
+	
+
+			if (szKeys[Index_key] == NULL)
+
+				break;
+
+			
+
+			Index_key++;
+
+		}
+
+		if (Index_key == 0){
+
+			if (Char_Check(dummy,":") > 0){
+
+				returnval=-1;		
+
+				
+
+				returnval= atoi(dummy);
+
+				sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB prd_getSvrList return 1 %d [%s]", szAcptNo,szSerNo,szSvrIP,
+
+																	szSvrSeq,returnval,dummy);
+
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+				
+
+				sprintf(szRstCond,"%04d",returnval);
+
+				
+
+				Result_Make(szRstFile,"SYSCB prd_getSvrList fail",szSvrIP,"SYSCB",szRstCond);
+
+				
+
+				File_Merge_2(szRstFile,szListLocal);
+
+				
+
+				
+
+				CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);				
+
+				break;
+
+			}
+
+			else{
+
+				sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB 파일리스트 분석실패 [%s]", szAcptNo,szSerNo,szSvrIP,
+
+																	szSvrSeq,dummy);
+
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+				
+
+				sprintf(szRstCond,"EROR");
+
+				
+
+				Result_Make(szRstFile,"SYSCB 파일리스트 분석실패",szSvrIP,"SYSCB",szRstCond);
+
+				File_Merge_2(szRstFile,szListLocal);
+
+				
+
+				CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);
+
+				continue;
+
+			}		
+
+			
+
+		}
+
+		
+
+		
+
+		
+
+		returnval=-1;	
+
+		
+
+		returnval= atoi(szKeys[0]);	
+
+		if (returnval == 1 && strlen(dummy) == 2) {
+
+			sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB prd_getSvrList return server nothing %d [%s]", szAcptNo,szSerNo,szSvrIP,
+
+																szSvrSeq,returnval,dummy);
+
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+		} else if (returnval != 0){
+
+			memset(writebuf,0x00,sizeof(writebuf));
+
+			sprintf(writebuf,"%s\n",szKeys[1]);
+
+			write_file(szListFile,writebuf);
+
+			writecnt++;
+
+			
+
+			sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB prd_getSvrList return 2 %d [%s]", szAcptNo,szSerNo,szSvrIP,
+
+																szSvrSeq,returnval,dummy);
+
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+			
+
+			sprintf(szRstCond,"%04d",returnval);			
+
+			Result_Make(szRstFile,szRstMsg,szSvrIP,"SYSCB",szRstCond);			
+
+			File_Merge_2(szRstFile,szListLocal);
+
+			CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);
+
+			
+
+			break;
+
+		}	
+
+		
+
+		
+
+		
+
+		for(i=1; i<Index_key;i++){
+
+			memset(writebuf,0x00,sizeof(writebuf));
+
+			sprintf(writebuf,"%s\n",szKeys[i]);
+
+			write_file(szListFile,writebuf);
+
+			writecnt++;
+
+		}
+
+		
+
+		
+
+	}
+
+	fclose (fptr1);	
+
+	
+
+	
+
+	if (readcnt > 0 && writecnt==0){
+
+		
+
+		sprintf(gszLogMsg, "[%s][%d][%s][%d] SYSCB prd_getSvrList Fail [%s]", szAcptNo,szSerNo,szSvrIP,
+
+															szSvrSeq,dummy);
+
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+		
+
+		sprintf(szRstCond,CmdInfo.szRstCond);
+
+		
+
+		Result_Make(szRstFile,"[SYSCB] prd_getSvrList Fail",szSvrIP,"SYSCB",szRstCond);
+
+		File_Merge_2(szRstFile,szListLocal);
+
+		
+
+		CMR1011_Make (szSysCD, szSvrIP, szAcptNo, szSerNo, szRstFile, 2, szRstCond, szSvrName, "SYSCB",szSvrCD,szSvrSeq,szRunGbn);
+
+		exit(1);
+
+	}
+
+	
+
+	
+
+	remove(szListLocal);
+
+	
+
+	exit (0);
+
+}
+
+
+
+
+
+int write_file(char *pFileName, char *pbuf){
+
+	FILE *fptr;
+
+	
+
+	fptr = fopen (pFileName, "a+");
+
+	
+
+	if (fptr == NULL){
+
+		return 1;
+
+	}
+
+	
+
+	fprintf(fptr,"%s",pbuf);
+
+	fflush(fptr);
+
+	
+
+	fclose(fptr);
+
+	
+
+	return 0;
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+
+/*             E N D    O F    P R O G R A M                     */
+
+/*---------------------------------------------------------------*/
+

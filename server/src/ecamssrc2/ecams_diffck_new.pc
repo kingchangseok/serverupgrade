@@ -1,0 +1,389 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_diffck_new.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ File Compare (diff)                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2012. 02. 17                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+char	SysCmd                    [1024]; /* 시스템 명령문       */
+int 	nRet1                           ; /* Char Find Work      */
+
+char   **gEnvp                          ;
+extern    int    errno                  ;
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : MakeFileWithVer                                  */
+/*	Function  : 버전파일 작성                                    */
+/*	Parameter : pItemCD : 프로그램등록번호                       */
+/*              pLocal  : 로컬파일명                             */
+/*              gVer    : 작성버전                               */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	MakeFileWithVer	( char *pItemCD
+						, char *pLocal
+						, char *gVer
+)
+{
+int 	i                               ;
+int 	nVersion                        ;
+char 	gDVServerIP                 [20];
+char 	SvrPath                  [dfDir];
+char 	Dev_ProgPath             [dfDir];
+int  	dfSendPort                      ;
+char 	szSysCD                [dfSysCD];
+char 	szSvrCD                [dfSvrCD];
+char 	szRsrcCD              [dfRsrcCD];
+char 	szInfo                     [100];
+char 	szStatus                     [2];
+char 	gRsrcName           [dfPhysName];
+int	 	szSvrSeq                        ;
+char 	iconvFileName       [dfFullPath];
+char 	szOzRsrc              [dfRsrcCD];
+int  	mRet                            ;
+int  	nNewVer                         ;
+
+CMD_INFO	CmdInfo                     ;
+
+
+    /*-----------------------------------------------------------*/
+    /*   소켓 STRUCTURE 초기화                                   */
+    /*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+	
+
+    /*-----------------------------------------------------------*/
+	/*   개발서버에서 가져와 비교                                */
+    /*-----------------------------------------------------------*/
+	if (strcmp(gVer, "T") == 0) {
+		EXEC SQL
+			SELECT  DISTINCT
+			        A.CM_SVRIP
+			      , A.CM_PORTNO
+			      , A.CM_SVRCD
+			      , A.CM_SEQNO
+			      , C.CR_RSRCCD
+			      , C.CR_SYSCD
+			      , C.CR_RSRCNAME
+			      , D.CM_DIRPATH
+			  INTO	:gDVServerIP
+			  	  , :dfSendPort
+			  	  , :szSvrCD
+			  	  , :szSvrSeq
+			  	  , :szRsrcCD
+			  	  , :szSysCD
+			  	  , :gRsrcName
+			  	  , :SvrPath
+			  FROM  CMM0031 A
+			      , CMM0038 B
+			      , CMR0020 C
+			      , CMM0070 D
+			 WHERE  C.CR_ITEMID = :pItemCD
+			   AND  A.CM_SVRCD  = '01'
+			   AND  C.CR_SYSCD  = A.CM_SYSCD
+			   AND  C.CR_RSRCCD = B.CM_RSRCCD
+			   AND  A.CM_SYSCD  = B.CM_SYSCD
+			   AND  A.CM_SVRCD  = B.CM_SVRCD
+			   AND  A.CM_SEQNO  = B.CM_SEQNO
+			   AND  C.CR_SYSCD  = D.CM_SYSCD
+			   AND  C.CR_DSNCD  = D.CM_DSNCD
+			   AND  A.CM_CLOSEDT IS NULL;
+
+	    if (sqlca.sqlcode != 0) {
+		    printf("SQLErrCheck 3: TEST Server 정보 오류 [%s] 01 [%d] [%s]\n", pItemCD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		    exit (3);
+	    }
+
+	    NotUseDataTruncate(gDVServerIP, 0x20);
+	    NotUseDataTruncate(szRsrcCD   , 0x20);
+	    NotUseDataTruncate(szSysCD    , 0x20);
+	    NotUseDataTruncate(SvrPath    , 0x20);
+	    NotUseDataTruncate(szSvrCD    , 0x20);
+        sprintf(gRsrcName, "%s", trunc_char(gRsrcName));
+
+	    ChangeVolPath(szSysCD , szSvrCD, szRsrcCD, szSvrSeq, SvrPath, Dev_ProgPath);
+
+	    sprintf(CmdInfo.szJobGub, "G");
+		sprintf(CmdInfo.szServerIP, "%s" , gDVServerIP);
+		CmdInfo.nPort = dfSendPort;
+		sprintf(CmdInfo.szRemote , "%s/%s" , Dev_ProgPath, gRsrcName);
+		sprintf(CmdInfo.szLocal  , "%s" , pLocal);
+	  	Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO(&CmdInfo);
+		
+		if(strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			printf("Dev Server File Receive Err1 [%s] \n", CmdInfo.szRemote);
+		    exit (3);
+		}
+		
+		memset(iconvFileName,0x00,sizeof(iconvFileName));
+		sprintf(iconvFileName,"%s.iconv",pLocal);
+		sprintf(SysCmd,"iconv -f UTF-8 -t IBM-eucKR '%s' > '%s' ",pLocal,iconvFileName);
+		mRet = system(SysCmd)/256;
+
+		if (mRet == 0) {
+			sprintf(SysCmd,"mv %s %s ",iconvFileName,pLocal);
+			system(SysCmd);
+		}
+		else {
+			remove(iconvFileName);
+		}
+		return;
+	} 
+	if (strcmp(gVer, "R") == 0) {
+		  /*-----------------------------------------------------------*/
+		  /*   컴파일서버에서 가져와 비교                                		   	    */
+		  /*-----------------------------------------------------------*/
+		EXEC SQL
+			SELECT  DISTINCT
+			        A.CM_SVRIP
+			      , A.CM_PORTNO
+			      , A.CM_SVRCD
+			      , A.CM_SEQNO
+			      , C.CR_RSRCCD
+			      , C.CR_SYSCD
+			      , C.CR_RSRCNAME
+			      , D.CM_DIRPATH
+			      , E.CM_INFO
+			  INTO	:gDVServerIP
+			  	  , :dfSendPort
+			  	  , :szSvrCD
+			  	  , :szSvrSeq
+			  	  , :szRsrcCD
+			  	  , :szSysCD
+			  	  , :gRsrcName
+			  	  , :SvrPath
+			  	  , :szInfo
+			  FROM  CMM0031 A
+			      , CMM0038 B
+			      , CMR0020 C
+			      , CMM0070 D
+			      , CMM0036 E
+			 WHERE  C.CR_ITEMID = :pItemCD
+			   AND  A.CM_SVRCD  = '03'
+			   AND  A.CM_CMPSVR = 'Y'
+			   AND  C.CR_SYSCD  = A.CM_SYSCD
+			   AND  C.CR_RSRCCD = B.CM_RSRCCD
+			   AND  A.CM_SYSCD  = B.CM_SYSCD
+			   AND  A.CM_SVRCD  = B.CM_SVRCD
+			   AND  A.CM_SEQNO  = B.CM_SEQNO
+			   AND  C.CR_SYSCD  = D.CM_SYSCD
+			   AND  C.CR_DSNCD  = D.CM_DSNCD
+			   AND  B.CM_SYSCD  = E.CM_SYSCD
+			   AND  B.CM_RSRCCD = E.CM_RSRCCD;
+
+	    if (sqlca.sqlcode != 0) {
+		    printf("SQLErrCheck 3: BUILD Server 정보 오류 [%s] 01 [%d] [%s]\n", pItemCD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		    exit (3);
+	    }
+
+	    NotUseDataTruncate(gDVServerIP, 0x20);
+	    NotUseDataTruncate(szRsrcCD   , 0x20);
+	    NotUseDataTruncate(szSysCD    , 0x20);
+	    NotUseDataTruncate(SvrPath    , 0x20);
+	    NotUseDataTruncate(szSvrCD    , 0x20);
+	    NotUseDataTruncate(szInfo    , 0x20);
+        sprintf(gRsrcName, "%s", trunc_char(gRsrcName));
+        
+        ChangeVolPath(szSysCD , szSvrCD, szRsrcCD, szSvrSeq, SvrPath, Dev_ProgPath);
+	    /*
+	    if (cmp_mid_char(szInfo,27,1,"0") == 0) {     
+			ChangeVolPath(szSysCD , szSvrCD, szRsrcCD, szSvrSeq, SvrPath, Dev_ProgPath);
+		} else {
+			if (strcmp(szRsrcCD,"26") == 0 && strcmp(left_char(gRsrcName,1),"b") == 0 &&
+				cmp_right_char(gRsrcName,3,".sh") == 0) {
+				sprintf(Dev_ProgPath,"/pgm/nb%s/shell",upper_char(mid_char(gRsrcName,2,4)));		
+			} else {		
+				sprintf(Dev_ProgPath,"%s",rep_char(SvrPath, "/nbsdev", "/nbsrun"));
+				sprintf(Dev_ProgPath,"%s",rep_char(Dev_ProgPath, "/ncsdev", "/ncsrun"));
+				sprintf(Dev_ProgPath,"%s",rep_char(Dev_ProgPath, "/ngikdev", "/ngikrun"));
+			}
+		}*/
+	    sprintf(CmdInfo.szJobGub, "G");
+		sprintf(CmdInfo.szServerIP, "%s" , gDVServerIP);
+		CmdInfo.nPort = dfSendPort;
+		sprintf(CmdInfo.szRemote , "'%s/%s'" , Dev_ProgPath, gRsrcName);
+		sprintf(CmdInfo.szLocal  , "'%s'" , pLocal);
+	  	Server_Cmd_JOB(&CmdInfo);
+		LookCMD_INFO(&CmdInfo);
+		if(strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			printf("Real Server File Receive Err [%s]\n", CmdInfo.szRemote);
+		    exit (3);
+		}
+		
+		memset(iconvFileName,0x00,sizeof(iconvFileName));
+		sprintf(iconvFileName,"%s.iconv",pLocal);
+		sprintf(SysCmd,"iconv -f UTF-8 -t IBM-eucKR '%s' > '%s' ",pLocal,iconvFileName);
+		mRet = system(SysCmd)/256;
+
+		if (mRet == 0) {
+			sprintf(SysCmd,"mv '%s' '%s' ",iconvFileName,pLocal);
+			system(SysCmd);
+		}
+		else {
+			remove(iconvFileName);
+		}
+		return;
+	}
+	memset(szOzRsrc, 0x00, sizeof(szOzRsrc));
+	memset(szStatus, 0x00, sizeof(szStatus));
+
+    /*-----------------------------------------------------------*/
+    /*   자원정보 조회                                           */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CR_RSRCCD
+		      , CR_LSTVER
+		      , CR_STATUS
+		  INTO  :szOzRsrc
+		  	  , :nNewVer
+		  	  , :szStatus
+		  FROM  CMR0020
+		 WHERE  CR_ITEMID = :pItemCD;
+
+	if (sqlca.sqlcode != 0) {
+		memset(szOzRsrc, 0x00, sizeof(szOzRsrc));
+	}
+
+	NotUseDataTruncate(szOzRsrc, 0x20);
+	NotUseDataTruncate(szStatus, 0x20);
+  	if (strcmp(gVer,"NEW") == 0)
+    	nVersion = nNewVer;
+	else
+		nVersion = atoi(gVer);
+
+	sprintf(SysCmd,"FileRead_cmr0025 '%s' '%s' %d",pItemCD,pLocal,nVersion);
+	system(SysCmd);
+
+	memset(iconvFileName,0x00,sizeof(iconvFileName));
+	sprintf(iconvFileName,"%s.iconv",pLocal);
+	sprintf(SysCmd,"iconv -f UTF-8 -t IBM-eucKR '%s' > '%s' ",pLocal,iconvFileName);
+	mRet = system(SysCmd)/256;
+
+	if (mRet == 0) {
+		sprintf(SysCmd,"mv %s %s ",iconvFileName,pLocal);
+		system(SysCmd);
+	}
+	else {
+		remove(iconvFileName);
+	}
+
+}
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       File  Compare    처리  M A I N                          */
+/*                                                               */
+/*   Parameter  :                                                */
+/*      1. BackUp Directory                                      */
+/*      2. OLD Sorc Name                                         */
+/*      3. NEW Sorc Name                                         */
+/*      4. UserID                                                */
+/*      5. 개발서버 주소                                         */
+/*      6. 개발서버 파일위치                                     */
+/*****************************************************************/
+int  main(int argc, char **argv, char **envp)
+{
+char	DiffSorc1           [dfFullPath]; /* 변경전파일          */
+char	DiffSorc2           [dfFullPath]; /* 변경후파일          */
+char	DiffFile            [dfFullPath]; /* 변경후파일          */
+char	tmpDir                   [dfDir];
+int   retval              ;     /* 시스템 명령처리 결과          */
+
+    if (argc < 4) {
+		printf ("usage : %s <ITEMID> <User ID> <SYSGBN>\n", argv[0]);
+        exit (1);
+    }
+
+    memset(SysCmd    , 0x00, sizeof(SysCmd    ));
+    memset(DiffFile  , 0x00, sizeof(DiffFile ));
+    memset(DiffSorc2 , 0x00, sizeof(DiffSorc2 ));
+    memset(DiffSorc2 , 0x00, sizeof(DiffSorc2 ));
+
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+
+    /*-----------------------------------------------------------*/
+    /*   Temp 디렉토리명 조회                                    */
+    /*-----------------------------------------------------------*/
+    SetTempDir("99", tmpDir);
+    
+    /*-----------------------------------------------------------*/
+    /*   로컬파일명 조립                                         */
+    /*-----------------------------------------------------------*/
+	sprintf(DiffSorc1, "%s/%s_old", tmpDir, argv[1]);
+	sprintf(DiffSorc2, "%s/%s_new", tmpDir, argv[1]);
+	sprintf(DiffFile, "%s/%s", tmpDir, argv[1]);
+    
+    if(strcmp(argv[3],"ALL") == 0) {
+	 	/*-----------------------------------------------------------*/
+	    /*   버전파일 작성                                           */
+	    /*-----------------------------------------------------------*/
+		MakeFileWithVer(argv[1], DiffSorc1 , "R"); 
+		MakeFileWithVer(argv[1], DiffSorc2 , "T");  
+	} else if(strcmp(argv[3],"TEST") == 0) {
+	 	/*-----------------------------------------------------------*/
+	    /*   버전파일 작성                                           */
+	    /*-----------------------------------------------------------*/
+		MakeFileWithVer(argv[1], DiffSorc1 , "T"); 
+		MakeFileWithVer(argv[1], DiffSorc2 , "NEW"); 
+	} else if (strcmp(argv[3],"REAL") == 0) {
+	 	/*-----------------------------------------------------------*/
+	    /*   버전파일 작성                                           */
+	    /*-----------------------------------------------------------*/
+		MakeFileWithVer(argv[1], DiffSorc1 , "R");  
+		MakeFileWithVer(argv[1], DiffSorc2 , "NEW");
+	} 	
+
+
+    /*-----------------------------------------------------------*/
+    /*     OLD File VS New File 비교실행                         */
+    /*-----------------------------------------------------------*/
+    sprintf(SysCmd, "diff %s %s > %s", DiffSorc1, DiffSorc2, DiffFile);
+    retval = system(SysCmd);
+	
+    remove (DiffFile);
+    remove (DiffSorc1);
+    remove (DiffSorc2);
+    
+    exit (retval/256);
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

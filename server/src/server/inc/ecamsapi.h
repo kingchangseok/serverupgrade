@@ -1,0 +1,332 @@
+/*-----------------------------------------------------------------
+ ¦£¦¡¦¡¦¡¦¡¦¡¦¡¦¨¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¤
+ ¦¢ ÇÁ·α׷¥¸í ¦¢ ecamsapi.h                                   ¦¢
+ ¦§¦¡¦¡¦¡¦¡¦¡¦¡¦«¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦©
+ ¦¢ ±â      ´É ¦¢ eCAMS¿¡¼­ »ç¿ëµǴÂ HEADER LIST ¹× DEFINE LIST¦¢
+ ¦§¦¡¦¡¦¡¦¡¦¡¦¡¦«¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦©
+ ¦¢ ÀÛ  ¼º  ÀÏ ¦¢ 2007. 10. 25                                 ¦¢
+ ¦§¦¡¦¡¦¡¦¡¦¡¦¡¦«¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦©
+ ¦¢ ÀÛ  ¼º  ÀÚ ¦¢ ÃÖ   º´   ³²                                 ¦¢
+ ¦¦¦¡¦¡¦¡¦¡¦¡¦¡¦ª¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¡¦¥
+----------------------------------------------------------------*/
+
+#include 	<stdio.h>
+#include 	<stdarg.h>
+#include 	<stdlib.h>
+#include 	<string.h>
+#include 	<strings.h>
+#include 	<fcntl.h>
+#include 	<grp.h>
+#include 	<termio.h>
+#include 	<signal.h>
+#include 	<errno.h>
+#include 	<unistd.h>
+#include 	<time.h>
+#include 	<ctype.h>
+#include 	<sys/time.h>
+#include 	<sys/types.h>
+#include 	<sys/stat.h>
+#include 	<sys/ipc.h>
+#include 	<sys/shm.h>
+#include 	<sys/msg.h>
+#include 	<sys/mman.h>
+
+/* Related Socket  */
+#include 	<sys/socket.h>
+#include 	<sys/uio.h>
+#include 	<netinet/in.h>
+#include 	<netdb.h>
+#include 	<arpa/inet.h>
+/*#include 	<dirent.h>*/
+#include 	<pwd.h>
+
+#ifdef __sun
+#include <sys/vfstab.h>
+#include <sys/statvfs.h>
+#endif
+
+
+/*---------------------------------------------------------------*/
+/*        CONSTANT  DECLARATION                                  */
+/*---------------------------------------------------------------*/
+#ifndef	DBCHAR
+#define    DBCHAR               unsigned char
+#endif
+
+#define		dfDEV_SVRCD		"01"
+#define		dfPROD_SVRCD	"05"
+
+#define		dfUNIX    		"01"
+#define		dfWINDOWS		"03"
+
+
+/*---------------------------------------------------------------*/
+/* 			±æÀ̰ü·Ã º¯¼ö                                        */
+/*---------------------------------------------------------------*/
+#define 	dfDir   		   1024+1
+#define		dfFile   		    150+1
+#define		dfFullPath   	   1200+1
+#define		dfInfo               50+1
+#define		dfSysCD               5+1
+#define		dfSysOS               2+1
+#define		dfDsnCD              10+1
+#define		dfItemID             12+1
+#define		dfRsrcCD              5+1
+#define		dfLangCD              5+1
+#define		dfSvrCD               2+1
+#define		dfSvrIP              20+1
+#define		dfSvrNM              50+1
+#define		dfSvrInfo            50+1
+#define		dfSysInfo            50+1
+#define		dfSysFc1              5+1
+#define		dfSysFc2              5+1
+#define 	dfAcptNo             12+1
+#define		dfPrcSys             10+1
+#define		dfRstCode             5+1
+#define		dfPFM_LIMIT          30
+#define		dfPFM_ISRT_LIMIT      5
+#define		dfRsrcType  	    512
+#define		dfPhysName          512
+#define		dfRsrcName          512
+#define		dfReqCD               2+1
+#define		dfJobCD			      5+1
+#define		dfConfNo             20+1
+#define		dfDocSeq             10+1
+#define		dfEditor             10+1
+#define		dfPrjNo              20+1
+
+
+#define		dfeCAMSSvrIP	 ""
+
+
+/*---------------------------------------------------------------*/
+/* 		Ftp type define                                          */
+/*---------------------------------------------------------------*/
+typedef struct {                                /* 200 Bytes     */
+        char    Start      [2];                 /* Log Start     */
+        char    Date       [8];                 /* ÀÏÀÚ          */
+        char    Time       [6];                 /* ½ð£          */
+        char    RegNo     [12];                 /* Á¢¼ö¹øȣ      */
+        char    SeqNo      [4];                 /* ÀϷùøȣ      */
+        char    ProcDiv    [8];                 /* ó¸®±¸ºÐ      */
+        char    ErrorCD    [2];                 /* Á¤»󿩺Î      */
+        char    MsgText  [158];                 /* ó¸®³»¿ë      */
+} WorkStatTag;
+
+
+#define 	TYPE_I 		    0
+#define 	TYPE_A 		    1
+
+#define    	OFF             0
+#define    	ON              1
+
+#ifndef		TRUE
+#define 	TRUE           	1
+#endif
+#ifndef		FALSE
+#define 	FALSE          	0
+#endif
+
+
+#ifndef uchar
+#define uchar  unsigned char
+#endif
+
+#ifndef ushort
+#define ushort  unsigned short
+#endif
+
+#ifndef ulong
+#define ulong  unsigned long
+#endif
+
+#define USHORT(X,Y)       (((X) << 8) + (Y))
+#define UINT(W,X,Y,Z)     (((W) << 24) + ((X) << 16) + ((Y) << 8) + (Z))
+
+/*---------------------------------------------------------------*/
+/*        ó¸®°á°ú  Command                                      */
+/*---------------------------------------------------------------*/
+#define    dfCmd_LINK         'L'    /* ¼¼¼Ç ¼³Á¤ ¿䱸 			 */
+#define    dfCmd_LIOK         'I'    /* ¼¼¼Ç ¼³Á¤ ÀÀ´ä 			 */
+#define    dfCmd_HTBT         'H'    /* ȸ¼± »óÅÂ Á¡°Ë 			 */
+#define    dfCmd_HTOK         'T'    /* ȸ¼± »óÅÂ Á¤»ó 			 */
+#define    dfCmd_CLSE         'C'    /* ¿¬°á Á¾·á ¿䱸 			 */
+#define    dfCmd_CLOK         'S'    /* ¿¬°á Á¾·á ÀÀ´ä 			 */
+#define    dfCmd_DATA         'D'    /* µ¥ÀÌÅÍ ¼۽Å    			 */
+#define    dfCmd_DAOK         'A'    /* µ¥ÀÌÅÍ ȮÀÎ    			 */
+#define    dfCmd_EROR         'E'    /* µ¥ÀÌÅÍ ¿À·ù    			 */
+
+/*---------------------------------------------------------------*/
+/*        DDE Command Define                                     */
+/*---------------------------------------------------------------*/
+#define    CmdBpAccnt         'A'    /* B/P Login Command        */
+#define    CmdBidMsg          'B'    /* Bid message Command      */
+#define    CmdBpExit          'X'    /* B/P Logout Command       */
+#define    CmdSendTrx         'T'    /* Send Transaction         */
+#define    CmdRequest         'R'    /* Request Command          */
+#define    CmdTandem          'C'    /* TANDEM Command           */
+#define    CmdSystem          'S'    /* System Command           */
+#define    CmdFileInf         'F'    /* File Information         */
+#define    CmdTndInf          'N'    /* TANDEM File Information  */
+#define    CmdEnvGet          'U'    /* eCAMS UserID/PassWord Get*/
+#define    CmdDECrypt         'D'    /* DECryption Data          */
+
+/*---------------------------------------------------------------*/
+/*       DDE Chain Infomation                                    */
+/*---------------------------------------------------------------*/
+#define    dfFirstChain        0x01  /* First Chine              */
+#define    dfMiddleChain       0x02  /* Middle Chine             */
+#define    dfLastChain         0x03  /* Last Chine               */
+#define    dfOnlyChain         0x04  /* Only Chine               */
+
+/*---------------------------------------------------------------*/
+/*      Communocation Error Code                                 */
+/*---------------------------------------------------------------*/
+#define    Successful           0
+#define    BrokenLng            1
+#define    BrokenData           2
+#define    OverLng              3
+#define    GrpError             4
+#define    CmdError             5
+#define    AlreadyLogin        11
+#define    ExistWsId           12
+#define    DidLogout           13
+#define    SidLogout           14
+#define    NoExistDid          15
+#define    NoExistSid          16
+#define    InvalidSid          17
+#define    Busy                21
+#define    DoubleTrx           22
+#define    NoSession           23
+#define    NoData              24
+#define    LineDisc            25
+#define    GetMsqErr           31
+#define    SndMsqErr           32
+
+
+
+/*---------------------------------------------------------------*/
+/*	SYSCB ERROR                                                  */
+/*---------------------------------------------------------------*/
+#define SYSCB_NOERROR		    0 
+#define SYSCB_PUT_ERROR		    1
+#define SYSCB_COM_ERROR		    2
+#define SYSCB_LINK_ERROR		3
+
+
+/*---------------------------------------------------------------*/
+/*	½Åû ±¸ºÐ Äڵå Á¤ÀÇ                                          */
+/*---------------------------------------------------------------*/
+#define REQ_CHECKOUT		"01"		  /*üũ¾ƿô             */
+#define REQ_RCHECKOUT		"02"		  /*ÀÌÀü¹öÀüüũ¾ƿô     */
+#define REQ_NEW				"03"		  /*½űÔ                 */
+#define REQ_MODIFY			"04"		  /*¼öÁ¤                 */
+#define REQ_DELETE			"05"		  /*Æó±â                 */
+#define REQ_ROLLBACK		"06"		  /*·ѹé                 */
+#define REQ_NMODIFY			"09"		  /*¹«¼öÁ¤               */
+#define REQ_CHKOUTCNCL   	"11"		  /*üũ¾ƿôÃë¼Ò         */
+#define REQ_IHCHECKIN   	"16"		  /*ÀϰýÀÌÇà             */
+
+
+
+/*---------------------------------------------------------------*/
+/*	¹èÆ÷, ÄÄÆÄÀÏ ±¸ºÐ                                            */
+/*---------------------------------------------------------------*/
+#define SYSCB				"C"
+#define SYSED				"R"
+
+
+/*---------------------------------------------------------------*/
+/*  	DDE Header Definition  10 Byte                           */
+/*---------------------------------------------------------------*/
+#define     dfeCAMSFepPort      29895
+#define	    dfeCAMSConfPort	    29896
+#define     dfeCAMSDBPort       29897
+#define     dfeCAMSInetPort     29898
+#define     dfeCAMSRootPort     29899
+
+int      	dfSendPort;              /* Server Socket Port       */
+
+#define    	BaseCommHeadLng      63
+
+/*---------------------------------------------------------------*/
+/*		Socket Header Definition                                 */
+/*---------------------------------------------------------------*/
+typedef struct {                      /* Length = 10 Byte        */
+        uchar    Grp         ;        /* B/P='S',Host='H',FEP='F'*/
+        uchar    Seq      [2];        /* Sequence                */
+        uchar    Cmd         ;        /* Command                 */
+        uchar    CF          ;        /* Chain Infomation        */
+        uchar    LuSts       ;        /* Device Status           */
+        uchar    EC          ;        /* Error Code              */
+        uchar    FepSts      ;        /* Not used..              */
+        uchar    Lng      [4];        /* Data length             */
+        uchar    IPAddr  [20];
+	    uchar    PortNo   [5];
+        uchar    FileSize[12];
+        uchar    FileDate[14];
+} BpComHead;
+
+
+/*---------------------------------------------------------------*/
+/*		MSG Que °ü·Ã Á¤ÀÇ                                        */
+/*---------------------------------------------------------------*/
+#define  dfAcctKey			(key_t)(0xac000001)
+#define  dfHTSKey			(key_t)(0xac000002)
+#define  dfTNDKey			(key_t)(0xac000003)
+#define  dfRetryKey			(key_t)(0xac000004)
+
+#define  dfeCAMSType     	10
+
+#define 	dfTrxDataSize 	  600
+#define     dfRemoteOffset    128
+#define     dfeCAMSBufSize  1000000
+
+#ifndef	dfMain
+	extern int  dfMaxFileSize;
+	extern int  dfMaxMsqSize;
+	extern int  dfMaxBufSize;
+#else
+	int  dfMaxFileSize = dfeCAMSBufSize;
+	int  dfMaxMsqSize;
+	int  dfMaxBufSize;
+#endif
+
+#define dfQueSize     1024
+#define dfMsqBusyRate   80
+
+
+/*---------------------------------------------------------------*/
+/*    	Communication Control Header                             */
+/*---------------------------------------------------------------*/
+#define    SOH               0x01    /* Start Of Header          */
+#define    STX               0x02    /* Start Of Text            */
+#define    ETX               0x03    /* End Of Text              */
+#define    ETB               0x17    /* End of Tansmission Block */
+#define    EOT               0x04    /* End Of Transmission      */
+#define    ENQ               0x05    /* Enquiry                  */
+#define    DLE               0x10    /* Data Link Escape         */
+#define    SYN               0x16    /* Synchronous idle         */
+#define    ACK               0x06    /* Acknowledge              */
+#define    NAK               0x15    /* Negative  Acknowledge    */
+#define    RES               0x07    /* Response                 */
+#define    REQ               0x08    /* Request                  */
+#define    CHN               0x09    /* Chain                    */
+
+FILE    *TRACE;
+FILE    *FTPTRACE;
+
+/*
+#if defined(__STDC__) || defined(__cplusplus) || defined(__sun) || defined(_AIX)
+#else
+#define system(t) callsystem(t) 
+#endif
+
+#define system(t) callsystem(t) 
+*/
+#include	<ecams_funclist.h>
+
+
+/*---------------------------------------------------------------*/
+/*                E N D   O F   F I L E                          */
+/*---------------------------------------------------------------*/

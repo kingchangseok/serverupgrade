@@ -1,0 +1,44 @@
+# ┌──────┬───────────────────────┐
+# │ 프로그램명 │ Makefile                                     │
+# ├──────┼───────────────────────┤
+# │ 기      능 │ UNIX c Compile Script                        │
+# ├──────┼───────────────────────┤
+# │ 작  성  일 │ 2007. 10. 25                                 │
+# ├──────┼───────────────────────┤
+# │ 작  성  자 │ 최   병   남                                 │
+# └──────┴───────────────────────┘
+
+#CFLAGS=-DLOGGING -g
+CFLAGS=-DLOGGING -g
+
+AR=ar rc
+CC=cc +DD64 -O2 -D MULTIARG -D TEST_MODE -D ON_LINE -D LOGGING
+#CC=cc -mlp64 -D MULTIARG -D TEST_MODE -D ON_LINE -D LOGGING
+CCcurses=cc
+eCAMS_HOME=$(APPHOME)
+INCLUDE= $(eCAMS_HOME)/inc
+LIBcurses=-lcurses -ltermcap
+BINPATH=$(eCAMS_HOME)/bin
+LIBPATH=$(eCAMS_HOME)/lib
+TARGET =$(LIBPATH)/libecams_comm.a
+
+OBJECT_MODE=64
+
+LIBAES = AES.o
+
+
+all: libaes
+
+.SUFFIXES: .c .o
+
+clean:
+	rm -f *.o core
+
+.c.o:
+#	$(CC)  $(CFLAGS) -c $*.c -o $@ -I$(INCLUDE) -I.
+	$(CC)  -c $*.c -o $@ -I$(INCLUDE) -I.
+
+libaes: $(LIBAES)
+	$(AR) $(TARGET) $(LIBAES)
+	rm -rf *.o
+

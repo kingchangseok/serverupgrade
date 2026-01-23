@@ -1,0 +1,273 @@
+/*-----------------------------------------------------------------
+ ┌──────┬────────────────────────┐
+ │ 프로그램명 │ ecams_sendmsg_sub.pc                           │
+ ├──────┼────────────────────────┤
+ │ 기      능 │ 결재관련 알림메세지 전송 건별 처리             │
+ ├──────┼────────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08.                                  │
+ ├──────┼────────────────────────┤
+ │ 작  성  자 │ 최   병   남                                   │
+ └──────┴────────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*		외부함수 include										 */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		내부함수			                                     */
+/*---------------------------------------------------------------*/
+
+
+int smsConfigSend(char *recvNo, char *msg);
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+char	gszDate[8+1];
+
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+	char     gConnStr    [50];
+EXEC SQL END DECLARE SECTION;
+
+
+int
+UpdApprovalData(char *pszDestIp, char *pszSendDate, int pmakeSeq) {
+
+	EXEC SQL
+		UPDATE	CMR9920
+		   SET	CR_SENDDATE	= TO_CHAR(SYSDATE,'YYYYMMDD')
+		 WHERE	CR_DESTIP	= :pszDestIp
+		   AND  CR_MAKEDATE = :pszSendDate
+		   AND  CR_MAKESEQ  = :pmakeSeq;
+
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] [%s][%s][%d] CMR9920 update Error : [%s][%d]", 
+		      pszDestIp,pszSendDate,pmakeSeq,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		EXEC SQL ROLLBACK;
+		return -1;
+	}
+
+	EXEC SQL COMMIT;
+	return 0;
+}
+
+/*****************************************************************/
+/*                                                               */
+/*		형상관리 결재관련 메세지전송 건별 처리  MAIN             */
+/*                                                               */
+/*****************************************************************/
+int  main(int argc, char **argv, char **envp)
+{
+int			iPort;
+char		szAcptNo	[12+1];
+char		szDestIp	[16+1];
+char		szMakedt	[14+1];
+char		szDocTitle [200+1];
+char		szDocMsg   [1000+1];
+char		szSendData	[2000];
+char		szSendUsr	[20+1];
+char		szRcvUsr	[20+1];
+char		szRecvId	[10+1];
+char		szLinkUrl	[200+1];
+char		szRcvTelNo 	 [20+1];
+char		szSndTelNo 	 [20+1];
+char		szEmail 	[128+1];
+char		szRepTit    [200+1];
+char		szRepMsg   [1000+1];
+char		szMailMsg  [1000+1];
+char        szSendDate     [15];
+char        szSendTel     [100];
+char        szSMSIp   [dfSvrIP];
+char        szDeptCD       [20];
+char        szMessage     [512];
+char        szCommand    [1024];
+int         szSMSPort;
+int			nRet;
+char		szNotiCD[2];
+char		*repptr;
+char		szUsrNM[512];
+int         makeSeq;
+char	    SysCmd     [1024]; /* 시스템 명령문       */
+char	    filename            [dfFullPath];
+int         ret = 0;
+char        szSmsMsg[101];
+
+
+    /*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	gEnvp = envp;				         /*### gEnvp = 환경변수  */
+	
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,"_msg.log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));
+
+	if (argc < 4) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] USAGE : %s <IP> <ACPTNO> <Makedt>", argv[0]);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+        exit (1);
+	}
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] ConnectDB Error");
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		exit(1);
+	}
+
+
+	strcpy(szDestIp, argv[1]);
+	strcpy(szMakedt, argv[2]);
+	iPort = 29896;
+	makeSeq = atoi(argv[3]);
+
+	NotUseDataTruncate(szDestIp, 0x00);
+	NotUseDataTruncate(szMakedt, 0x00);
+
+
+	memset(szDocTitle   , 0x00, sizeof(szDocTitle));
+	memset(szDocMsg     , 0x00, sizeof(szDocMsg  ));
+	memset(szSendData   , 0x00, sizeof(szSendData));
+	memset(szSendUsr    , 0x00, sizeof(szSendUsr ));
+	memset(szRcvUsr     , 0x00, sizeof(szRcvUsr  ));
+	memset(szLinkUrl    , 0x00, sizeof(szLinkUrl ));
+	memset(szEmail      , 0x00, sizeof(szEmail ));
+	memset(szRcvTelNo   , 0x00, sizeof(szRcvTelNo ));
+	memset(szSndTelNo   , 0x00, sizeof(szSndTelNo ));
+	memset(szRecvId     , 0x00, sizeof(szRecvId ));
+	memset(szSmsMsg     , 0x00, sizeof (szSmsMsg));
+	memset(szNotiCD     , 0x00, sizeof (szNotiCD));
+
+
+    /*-----------------------------------------------------------*/
+    /*   전송 메시지 조회                                        */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT	A.CR_DOCTITLE
+			  , A.CR_DOCMSG
+			  , A.CR_SENDUSR
+			  , A.CR_RCVUSR
+			  , A.CR_LINKURL
+			  , TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+			  , A.CR_RECVID
+			  , NVL(A.CR_NOTICD, 'S')
+			  , B.CM_PROJECT
+		  INTO  :szDocTitle
+		  	  , :szDocMsg
+		  	  , :szSendUsr
+		  	  , :szRcvUsr
+		  	  , :szLinkUrl
+		  	  , :szSendDate
+		  	  , :szRecvId
+		  	  , :szNotiCD
+		  	  , :szDeptCD
+		  FROM	CMR9920 A,CMM0040 B
+		 WHERE	A.CR_SENDDATE IS NULL
+		   AND  A.CR_DESTIP   = :szDestIp
+		   AND  A.CR_MAKEDATE = :szMakedt
+		   AND  A.CR_MAKESEQ  = :makeSeq
+		   AND  A.CR_DOCMSG IS NOT NULL
+		   AND  A.CR_SENDUSR  = B.CM_USERID
+	 ORDER  BY CR_MAKETIME DESC;
+
+	if (sqlca.sqlcode == 1403)
+		return 0;
+
+	else
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] [%s][%s][%d] CMR9920 Select Error : [%s][%d]", 
+		      szDestIp,szMakedt,makeSeq,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		return -1;
+	}
+
+	sprintf(szLinkUrl  , "%s", trunc_char(szLinkUrl ));
+	sprintf(szDocMsg   , "%s", trunc_char(szDocMsg  ));
+	sprintf(szDocTitle , "%s", trunc_char(szDocTitle));
+	sprintf(szRcvUsr   , "%s", trunc_char(szRcvUsr  ));
+	sprintf(szSendUsr  , "%s", trunc_char(szSendUsr ));
+	sprintf(szSendDate , "%s", trunc_char(szSendDate));
+	sprintf(szNotiCD   , "%s", trunc_char(szNotiCD  ));
+	sprintf(szRecvId   , "%s", trunc_char(szRecvId  ));
+	sprintf(szDeptCD   , "%s", trunc_char(szDeptCD  ));
+	NotUseDataTruncate (szNotiCD,0x20);
+	
+	if (strcmp(szNotiCD,"S") != 0) return 1;
+	
+	EXEC SQL
+	   SELECT CM_SVRIP,CM_PORTNO
+	     INTO :szSMSIp,:szSMSPort
+	     FROM CMM0015
+	    WHERE CM_STNO='ECAMS'
+	      AND CM_GBNCD='SM';
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] [%s][%s][%d] SMS Info Select Error : [%s][%d]", 
+		      szDestIp,szMakedt,makeSeq,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		return -1;	
+	}
+	NotUseDataTruncate (szSMSIp,0x20);
+	
+	memset(szMessage     , 0x00, sizeof(szMessage  ));
+    /* 80자리만 넘겨야함 */
+    if (strlen(szDocMsg)>80) {      
+    	sprintf(szMessage, "%s", left_char(szDocMsg, 80));
+	} else {
+		strcpy(szMessage, szDocMsg);	
+	} 
+   /*java SmsSend "192.168.124.136" 9100 "HAND00001" "MASTER" "MASTER" "관리자" "01092340709" "TEST MESSAGE 입니다" */
+   /*              ip               port  요청자부서     요청자      수신자ID   수신자명  전화번호          내용                */
+	sprintf(szCommand,"java SmsSend %s %d %s %s %s %s %s \"%s\"", 
+	            szSMSIp,szSMSPort,szDeptCD,szSendUsr,szRecvId,szRcvUsr,szDestIp,szMessage);
+	nRet = system(szCommand) / 256;
+	if (nRet != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] [%s][%s][%d] SMS Send Fail [%s]",
+                 szDestIp,szMakedt,makeSeq, szCommand);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		return 1;		
+	} else {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] [%s][%s][%d] SMS Send succes [%s]",
+                 szDestIp,szMakedt,makeSeq, szCommand);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+	}
+	
+	EXEC SQL
+		UPDATE	CMR9920
+		   SET	CR_SENDDATE	= TO_CHAR(SYSDATE,'YYYYMMDD')
+		 WHERE	CR_DESTIP	= :szDestIp
+		   AND  CR_MAKEDATE = :szMakedt
+		   AND  CR_MAKESEQ  = :makeSeq;
+
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmsg_sub] [%s][%s][%d] CMR9920 update Error : [%s][%d]", 
+		      szDestIp,szMakedt,makeSeq,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		EXEC SQL ROLLBACK;
+		return -1;
+	}
+	EXEC SQL COMMIT;
+	return 0;
+
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

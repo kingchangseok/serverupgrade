@@ -1,0 +1,518 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_cmpsrc.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ File Compare (diff)                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2010. 01. 19                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int  	Make_DiffFile 		();
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+char    szExePgm                    [50];
+char	SysCmd                    [1024]; /* 시스템 명령문       */
+char	devFile                     [50]; /* Local File SaveFile */
+int 	nRet1                           ; /* Char Find Work      */
+int 	CurrCnt                         ; /* Source Line Count   */
+
+char   **gEnvp                          ;
+extern    int    errno                  ;
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Make_DiffFile                                    */
+/*	Function  : 변경전/변경후 파일 작성                          */
+/*	Parameter : RsrcFile  : 원시파일                             */
+/*              DiffFile  : 비교파일                             */
+/*              RstFile   : 변경전/변경후 결과 파일              */
+/*              diffcode  : 변경전/변경후 구분코드               */
+/*	Return    : 결과코드                                         */
+/*---------------------------------------------------------------*/
+int 	Make_DiffFile	( char *RsrcFile
+						, char *DiffFile
+						, char *RstFile
+						, int   diffcode
+						)
+{
+FILE	*OLDPtr                         ;
+FILE	*DiffPtr                        ;
+FILE	*RstPtr                         ;
+char	LeftStr                     [20];
+char	RightStr                    [20];
+char	DiffCmd                      [5];
+int 	Line1                           ;
+int 	Line2                           ;
+int 	Line3                           ;
+int 	Line4                           ;
+int 	i                               ;
+char	szCntWK                    [256];
+char	*dummy                   ; /* Read Buffer         */
+long	nFileSize              ;
+long	nFileSize2              ;
+	
+	
+	sprintf(gszLogMsg,"[%s] Make_DiffFile Start [%s][%s] \n",szExePgm,RsrcFile,DiffFile);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (Diff File)                                   */
+    /*-----------------------------------------------------------*/
+    if ((DiffPtr = fopen(DiffFile,"r")) == (FILE *) NULL) {
+    	sprintf(gszLogMsg,"[%s] FILE OPEN ERROR 1 [%s] \n",szExePgm,DiffFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+        return (-1);
+    }
+
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (OLD/NEW File)                                */
+    /*-----------------------------------------------------------*/
+    if ((OLDPtr = fopen(RsrcFile,"r")) == (FILE *) NULL) {
+    	sprintf(gszLogMsg,"[%s] FILE OPEN ERROR 2 [%s] \n",szExePgm,RsrcFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+    	fclose (DiffPtr);
+        return (-1);
+    }
+    
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (Result File)                                 */
+    /*-----------------------------------------------------------*/
+    if ((RstPtr = fopen(RstFile,"w")) == (FILE *) NULL) {
+    	sprintf(gszLogMsg,"[%s] FILE OPEN ERROR 3 [%s] \n",szExePgm,RstFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+    	fclose (DiffPtr);
+    	fclose (OLDPtr);
+        return (-1);
+    }
+    nFileSize = FileSizeInf(RsrcFile) + 1;
+    nFileSize2 = FileSizeInf(RsrcFile) + 1;
+/*
+    if (nFileSize  > 8192)	nFileSize  = 8192;
+    if (nFileSize2 > 8192)	nFileSize2 = 8192;
+*/
+    if (nFileSize2 == 0) nFileSize2 = nFileSize;
+    if (nFileSize > nFileSize2) {
+    	dummy = (char *)malloc(nFileSize);
+		memset(dummy, 0x00, nFileSize);
+	} else {
+		dummy = (char *)malloc(nFileSize2);
+		memset(dummy, 0x00, nFileSize2);	
+	}
+	
+    CurrCnt = 0;
+    while (fgets(dummy, nFileSize2, DiffPtr) != (char *)NULL) {
+	    /*if (strlen(dummy) == 0)	break;*/
+        /*-------------------------------------------------------*/
+    	/* Return Valure Truncate                                */
+        /*-------------------------------------------------------*/
+        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+        /*-------------------------------------------------------*/
+    	/*    변경기록 Line 추출                                 */
+        /*-------------------------------------------------------*/
+        if (memcmp(dummy,"0",1) >= 0 &&
+            memcmp(dummy,"9",1) <= 0 ) {
+           nRet1 = Char_Check(dummy, "d");
+           if (nRet1 < 0) {
+              nRet1 = Char_Check(dummy, "a");
+              if (nRet1 < 0) {
+                 nRet1 = Char_Check(dummy, "c");
+                 if (nRet1 < 0) {
+			    	sprintf(gszLogMsg,"[%s] DIFF Check Error [%s] \n",szExePgm,dummy);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+                 }
+              }
+           }
+
+           /*----------------------------------------------------*/
+           /*   변경 Line 계산                                   */
+           /*     OLD (From/TO),  TO (From/TO)                   */
+           /*----------------------------------------------------*/
+           if (nRet1 >= 0) {
+              memset(LeftStr, 0x00, sizeof(LeftStr));
+              memset(RightStr, 0x00, sizeof(RightStr));
+              memset(DiffCmd, 0x00, sizeof(DiffCmd));
+
+              memcpy(LeftStr, dummy, nRet1);
+              memcpy(RightStr, &dummy[nRet1+1], strlen(dummy)-nRet1);
+              memcpy(DiffCmd, &dummy[nRet1], 1);
+
+              nRet1 = Char_Check(LeftStr, ",");
+              if (nRet1 < 0) {
+              	 Line1 = atoi(LeftStr);
+              	 Line2 = atoi(LeftStr);
+              }
+              else {
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", left_char(LeftStr, nRet1));
+				Line1 = atoi(szCntWK);
+
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", right_char(LeftStr, strlen(LeftStr)-nRet1-1));
+				Line2 = atoi(szCntWK);
+              }
+
+              nRet1 = Char_Check(RightStr, ",");
+              if (nRet1 < 0) {
+              	 Line3 = atoi(RightStr);
+              	 Line4 = atoi(RightStr);
+              }
+              else {
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", left_char(RightStr, nRet1));
+				Line3 = atoi(szCntWK);
+
+				memset(szCntWK, 0x00, sizeof(szCntWK));
+				sprintf(szCntWK, "%s", right_char(RightStr, strlen(RightStr)-nRet1-1));
+				Line4 = atoi(szCntWK);
+              }
+           }
+
+           /*----------------------------------------------------*/
+    	   /*    변경전 파일 작성                                */
+           /*----------------------------------------------------*/
+           if (diffcode == 1) {
+              /*-------------------------------------------------*/
+    	      /*    Delete Line 작성                             */
+              /*-------------------------------------------------*/
+              if (memcmp(DiffCmd, "d", 1) == 0) {
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line1)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line2)
+                       fprintf(RstPtr, "D %s\r\n", dummy);
+
+                    if (CurrCnt == Line2) break;
+                 }
+              }
+
+              /*-------------------------------------------------*/
+              /*    Insert Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "a", 1) == 0) {
+				 if (Line2 == 0) {
+					for (i = Line3; i <= Line4; i++) {
+						fprintf(RstPtr, "  \r\n");
+					}
+					continue;
+				 }
+
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line1)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt == Line2) {
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+
+                       for (i = Line3; i <= Line4; i++) {
+                       	   fprintf(RstPtr, "  \r\n");
+                       }
+                    }
+
+                    if (CurrCnt == Line2) break;
+                 }
+              }
+
+
+              /*-------------------------------------------------*/
+              /*    Change Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "c", 1) == 0) {
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line1)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line2) {
+                       fprintf(RstPtr, "RO%s\r\n", dummy);
+                    }
+
+                    if (CurrCnt == Line2) {
+                       if (Line4-Line3 > Line2-Line1) {
+                          for (i = 1; i <= (Line4-Line3) - (Line2-Line1); i++) {
+                       	      fprintf(RstPtr, "  \r\n");
+                          }
+                       }
+                       break;
+                    }
+                 }
+              }
+           }
+
+           /*----------------------------------------------------*/
+    	   /*    변경후 파일 작성                                */
+           /*----------------------------------------------------*/
+           else {
+              /*-------------------------------------------------*/
+              /*    Insert Line 작성                             */
+              /*-------------------------------------------------*/
+              if (memcmp(DiffCmd, "a", 1) == 0) {
+                 while (1) {
+                    if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+		            /*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+                    CurrCnt++;
+                    if (CurrCnt < Line3)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line4)
+                       fprintf(RstPtr, "I %s\r\n", dummy);
+
+                    if (CurrCnt == Line4) break;
+                 }
+              }
+
+              /*-------------------------------------------------*/
+    	      /*    Delete Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "d", 1) == 0) {
+                 while (1) {
+                    if (CurrCnt < Line3) {
+                       	if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+			            /*if (strlen(dummy) == 0)	break;*/
+
+				        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+				        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+				        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+
+						CurrCnt++;
+						fprintf(RstPtr, "  %s\r\n", dummy);
+                    }
+
+                    else if (CurrCnt == Line3) {
+                       for (i = Line1; i <= Line2; i++) {
+                       	   fprintf(RstPtr, "D \r\n");
+                       }
+
+                       break;
+                    }
+                 }
+              }
+
+
+              /*-------------------------------------------------*/
+              /*    Change Line 작성                             */
+              /*-------------------------------------------------*/
+              else if (memcmp(DiffCmd, "c", 1) == 0) {
+                 while (1) {
+					if (fgets(dummy, nFileSize, OLDPtr) == (char *) NULL) break;
+					/*if (strlen(dummy) == 0)	break;*/
+
+			        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+
+
+                    CurrCnt++;
+                    if (CurrCnt < Line3)
+                       fprintf(RstPtr, "  %s\r\n", dummy);
+                    else if (CurrCnt <= Line4) {
+						if (CurrCnt <= (Line2 - Line1 + Line3))
+                       		fprintf(RstPtr, "RN%s\r\n", dummy);
+                       	else
+                       		fprintf(RstPtr, "I %s\r\n", dummy);
+                    }
+
+                    if (CurrCnt == Line4) {
+                       if (Line2-Line1 > Line4-Line3) {
+                          for (i = 1; i <= (Line2-Line1) - (Line4-Line3); i++) {
+                       	      fprintf(RstPtr, "RN\r\n");
+                          }
+                       }
+                       break;
+                    }
+                 }
+              }
+           }
+       }
+    }
+
+	while (1) {
+       	if (fgets(dummy, nFileSize, OLDPtr) == (char *)NULL ) break;
+	    /*if (strlen(dummy) == 0)	break;*/
+
+        sprintf(dummy, "%s", rep_char(dummy,"\r\n",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+        sprintf(dummy, "%s", trunc_char(dummy));
+
+		CurrCnt++;
+		fprintf(RstPtr, "  %s \r\n", dummy);
+	}
+    fclose (DiffPtr);
+    fclose (OLDPtr);
+    fclose (RstPtr);
+	
+	sprintf(gszLogMsg,"[%s] Make_DiffFile End [%s][%s] \n",szExePgm,RsrcFile,DiffFile);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	
+    return 1;
+}
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       File  Compare    처리  M A I N                          */
+/*                                                               */
+/*   Parameter  :                                                */
+/*      1. BackUp Directory                                      */
+/*      2. OLD Sorc Name                                         */
+/*      3. NEW Sorc Name                                         */
+/*      4. UserID                                                */
+/*      5. 개발서버 주소                                         */
+/*      6. 개발서버 파일위치                                     */
+/*****************************************************************/
+int  main(int argc, char **argv, char **envp)
+{
+
+char	DiffFile            [dfFullPath]; /* diff 결과 파일      */
+char	RstOLDFile          [dfFullPath]; /* 변경전파일          */
+char	RstNEWFile          [dfFullPath]; /* 변경후파일          */
+char	DiffSorc1           [dfFullPath]; /* 변경전파일          */
+char	DiffSorc2           [dfFullPath]; /* 변경후파일          */
+char	sysgb	                     [3]; /* 시스템 구분         */
+char	sSysUp                       [3]; /* 시스템 OS 구분      */
+char	sDown                        [3]; /* DOWN 여부           */
+char	tmpDir                   [dfDir];
+
+	memset(szExePgm   , 0x00, sizeof(szExePgm   ));
+	strcpy(szExePgm,argv[0]);
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));	
+	
+    if (argc < 5) {
+		printf ("usage : %s <BEFOREFILE> <AFTERFILE> <OUTFILE> <BLANKYN:true|false>\n", argv[0]);
+		
+		sprintf(gszLogMsg,"Usage : [%s] <BEFOREFILE> <AFTERFILE> <OUTFILE> <BLANKYN:true|false>\n",szExePgm);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+        exit (1);
+    }
+
+    memset(SysCmd    , 0x00, sizeof(SysCmd    ));
+    memset(DiffFile  , 0x00, sizeof(DiffFile  ));
+    memset(RstOLDFile, 0x00, sizeof(RstOLDFile));
+    memset(RstNEWFile, 0x00, sizeof(RstNEWFile));
+    memset(DiffSorc1 , 0x00, sizeof(DiffSorc1 ));
+    memset(DiffSorc2 , 0x00, sizeof(DiffSorc2 ));
+    memset(devFile   , 0x00, sizeof(devFile   ));
+
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		sprintf(gszLogMsg,"[%s] ConnectDB Fail \n",szExePgm);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		exit(1);
+	}
+	sprintf(gszLogMsg,"[%s] Start \n",szExePgm);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+    /*-----------------------------------------------------------*/
+    /*   Temp 디렉토리명 조회                                    */
+    /*-----------------------------------------------------------*/
+    SetTempDir("99", tmpDir);
+
+    sprintf(RstOLDFile, "%s/%s.1", tmpDir, argv[1]);
+    sprintf(RstNEWFile, "%s/%s.2", tmpDir, argv[2]);
+
+    /*-----------------------------------------------------------*/
+    /*   로컬파일명 조립                                         */
+    /*-----------------------------------------------------------*/
+	sprintf(DiffSorc1, "%s/%s", tmpDir, argv[1]);
+	sprintf(DiffSorc2, "%s/%s", tmpDir, argv[2]);
+	sprintf(DiffFile, "%s/%s", tmpDir, argv[3]);
+
+    /*-----------------------------------------------------------*/
+    /*     OLD File VS New File 비교실행                         */
+    /*-----------------------------------------------------------*/
+    /* 20190118 neo. 공백무시 옵션 기능추가 */
+    if (strcmp(argv[6],"true") == 0) {
+    	sprintf(SysCmd, "diff -w %s %s > %s", DiffSorc1, DiffSorc2, DiffFile);
+    } else {
+    	sprintf(SysCmd, "diff %s %s > %s", DiffSorc1, DiffSorc2, DiffFile);
+    }
+    system(SysCmd);
+
+    /*-----------------------------------------------------------*/
+    /*     OLD File 작성                                         */
+    /*-----------------------------------------------------------*/
+    Make_DiffFile (DiffSorc1, DiffFile, RstOLDFile, 1);
+
+    /*-----------------------------------------------------------*/
+    /*     NEW File 작성                                         */
+    /*-----------------------------------------------------------*/
+	if (Make_DiffFile (DiffSorc2, DiffFile, RstNEWFile, 2) < 0) {
+		remove (DiffFile);
+	    remove (DiffSorc1);
+	    remove (DiffSorc2);
+        exit (1);
+    }
+    remove (DiffFile);
+    remove (DiffSorc1);
+    remove (DiffSorc2);
+    
+    sprintf(gszLogMsg,"[%s] End  \n",szExePgm);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+    exit (0);
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

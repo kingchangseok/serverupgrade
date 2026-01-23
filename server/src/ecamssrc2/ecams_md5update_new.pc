@@ -1,0 +1,141 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_md5update.pc                           │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 등록자원의 MD5SUM 값이 없는경우 MD5SUM값     │
+ │            │ 등록해주는 프로그램                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2010. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include 	<ecamsapi.h>
+#include	<ecams_util.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*      형상관리 등록자원의  MD5SUM값 등록 처리 M A I N          */
+/*                                                               */
+/*****************************************************************/
+int 	main (int argc, char **argv, char **envp)
+{
+char	szItemID              [dfItemID];
+char	szAcptNo              [dfAcptNo];
+int		nMajVer                            ;
+int		nMinVer                            ;
+char	szLocal             [dfFullPath];
+char	md5val                      [33];
+char	szCommand                  [512];
+char	nRet                            ;
+char	szTmpDir                 [dfDir];
+struct 	stat f_st                       ;
+long    nFileSize;
+char 	szSysCD                [dfSysCD];
+
+	gEnvp = envp;
+	if (argc < 2){
+		fprintf(stderr, "Usage: <시스템> \n");
+		exit(1);
+	}
+	memset(szSysCD , 0x00, sizeof(szSysCD ));
+	sprintf(szSysCD,argv[1]);
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+	memset(szTmpDir,0x00,sizeof(szTmpDir));
+	SetTempDir("99",szTmpDir);
+
+    /*-----------------------------------------------------------*/
+    /*	형상관리에 MD5SUM값이 미등록된 자원목록 작성             */
+    /*-----------------------------------------------------------*/
+	EXEC SQL DECLARE SYSInfo CURSOR FOR
+		SELECT  b.CR_ITEMID
+		      , b.CR_ACPTNO
+		      , b.CR_VER
+		      , b.CR_DEVVER		      
+		  FROM  CMR0020 a,CMR0025 b
+		 WHERE  a.CR_SYSCD = DECODE(:szSysCD,'ALL',a.CR_SYSCD,:szSysCD)
+		   AND  b.CR_MD5SUM IS NULL
+		   AND  a.CR_ITEMID=b.CR_ITEMID
+		   AND  a.CR_LSTVER=b.CR_VER
+		   AND  a.CR_EDITVER=b.CR_DEVVER;
+
+	EXEC SQL open SYSInfo;
+	while (1) {
+		EXEC SQL FETCH SYSInfo
+			INTO  :szItemID
+				, :szAcptNo
+				, :nMajVer    
+				, :nMinVer    ;
+
+		NotUseDataTruncate(szItemID, 0x20);
+		NotUseDataTruncate(szAcptNo, 0x20);
+
+		if (sqlca.sqlcode == 1403)	break;
+
+		memset(szLocal, 0x00, sizeof(szLocal));
+		sprintf(szLocal,"%s/%s.%d.%d", szTmpDir, szItemID, nMajVer, nMinVer);
+		sprintf(szCommand,"FileRead_cmr0025 \"%s\" \"%s\" \"%d\" \"%d\"", szItemID, szLocal, nMajVer, nMinVer);
+		nRet = system(szCommand)/256;
+		if (nRet != 0) {
+			fprintf(stderr,"file Make err [%s][%s]\n",szItemID,szCommand);
+			continue;
+		}
+		if (access(szLocal,F_OK) != 0) {
+			fprintf(stderr,"file Size Zero [%s]\n",szLocal);
+			continue;	
+		}
+		memset(md5val, 0x00, sizeof(md5val));
+		nRet = MD5SUM(szLocal,md5val);
+		if (nRet != 0) {
+			fprintf(stderr,"md5sum err [%s][%s]\n",szItemID,szLocal);
+			continue;
+		}
+		
+		stat(szLocal, &f_st);
+		nFileSize = f_st.st_size;
+		
+	    /*-------------------------------------------------------*/
+	    /*	MD5SUM값 변경 등록                                   */
+	    /*-------------------------------------------------------*/
+		EXEC SQL
+			UPDATE  CMR0025
+			   SET  CR_MD5SUM = :md5val,
+			        CR_FILESIZE = :nFileSize
+			 WHERE  CR_ITEMID = :szItemID
+			   AND  CR_ACPTNO = :szAcptNo
+			   AND  CR_VER    = :nMajVer
+			   AND  CR_DEVVER = :nMinVer;
+
+		if (sqlca.sqlcode != 0) {
+			fprintf(stderr,"md5sum val update err [%d] [%s]\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+			exit (1);
+
+		}
+		EXEC SQL COMMIT;
+		remove(szLocal);
+    }
+    EXEC SQL close SYSInfo;
+    EXEC SQL COMMIT WORK RELEASE;
+
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

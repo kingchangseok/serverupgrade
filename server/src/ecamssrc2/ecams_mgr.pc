@@ -1,0 +1,1385 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_mgr.pc                                 │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ eCAMS 처리 MAIN                              │
+ │            │ MASTER TABLE을 검색하여 처리대상을 O아 대상 │
+ │            │ 처리프로그램을 fork                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 12                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain	1
+
+#include 	<ecamsapi.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+  char      gAcptNo             [16];  /* 접수 번호              */
+  int       gSerNo                  ;  /* 일련 번호              */
+  char      p_ConfTeam          [40];  /* 처리 단계              */
+  char      p_SysFc1             [3];  /* 체크아웃구분           */
+  char      gQryCD               [5];  /* 신청 구분              */
+  char      gAgentDtTime        [20];  /* Agent Check Date/Time  */
+  int       gAgentMM                ;  /* Agent Check 경과시간   */
+EXEC SQL END DECLARE SECTION;
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+void	CheckProcStep          	(void  );
+void	CMR1000_Check          	(void  );
+void	CMR9900_Check          	(int   , char *);
+void	CMR1010_Check          	(char *);
+int 	CMR1030_Check 			(char *, char *);
+void	NotUseDataTruncate     	(char *, int   );
+void	eCAMS_Acct_Fork 		(char *);
+void	GetDB_SysDate          	(void  );
+void	DefineParentSignal     	(void  );
+void	ExitParentProc         	(int   );
+void	Agent_Check            	(void  );
+void	DebugLog				(char *, int   );
+void	MGRExistenceCheck      	(void  );
+int 	File_Maint				(char *, int   );
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+#ifdef _OSF_SOURCE
+static  void sig_cld         (void);
+#endif
+
+char   	**gEnvp                 ;
+char    systime [16], sysdate [16];    /* 현재일자, 시간         */
+char 	MyLog   [5000];                /* debug 로그 내용        */
+int 	bLog          ;                /* debugging 여부         */
+char    szSysGbn        [5];           /* 시스템구분 TEST,REAL               */
+
+#define	_AgtLimit   10
+
+
+/*---------------------------------------------------------------*/
+/*    Log 기록용 변수                                            */
+/*---------------------------------------------------------------*/
+int		totforkcnt                      ;
+int		forkmaxnum                      ;
+char	szSysCD                [dfSysCD];
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : CheckProcStep                                    */
+/*	Action    : 요일별/시간별 처리여부 Check                     */
+/*  Parameter : 없슴                                             */
+/*  Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void 	CheckProcStep	( void
+						)
+{
+EXEC SQL BEGIN DECLARE SECTION;
+char	Bef2Mon                     [10]; /* 2개월전 일자        */
+char	issunday                    [10];
+char	cmpAgntDt                   [10];
+char	syscmd                    [2048];
+char	chktime                   [10+1];
+char	szDelcd                   [10+1];
+char	szTmpPath                [dfDir];
+int 	Log_Del_Jugi                    ;
+char	szTarIp                [dfSvrIP];
+int		szTarPort                       ;
+int		fetchcnt                        ;
+int     diffcnt                         ;
+int     ret                             ;
+char	szBackPath               [dfDir];
+char	szBinPath                [dfDir];
+char	szGbnCD                    [2+1];
+char	col_USERID            [dfEditor];
+int 	col_BLKSEQ                      ;
+char    diffSys                      [6];
+char    diffSvrIp                   [20];
+char    diffSysDay                   [9];
+char    sysPath                  [dfDir];
+char    sysPathCd                    [3];
+char    sysDayYYYY                   [5];
+char    sysDayMM                     [3];
+char    szUserId                     [20];
+char    szLockBaseDt                 [5+1];
+char    szLogHisP                    [5+1];
+int     dSeq                            ;
+int     srmCnt                          ;
+char   szReqdate        [8+1];
+int   szReqNew       ;
+int   szReqMod       ;
+int   szReqNom       ;
+int   szReqDel         ;
+int   nLockDay      ;
+int   nSaveTerm     ;
+
+
+
+EXEC SQL END DECLARE SECTION;
+
+	sprintf(MyLog, "%s", "MGR  CheckProcStep() START ==================== \n");
+	DebugLog (MyLog,bLog);
+
+	/*-----------------------------------------------------------*/
+	/*	형상관리 디렉토리 조회                                   */
+	/*-----------------------------------------------------------*/
+	SetTempDir("14", szBinPath);
+	
+	
+	while (1) {
+		/*
+		while (1) {
+			sprintf(syscmd, "procckque ecams_querecv");
+			ret = system(syscmd)/256;
+			if (ret >= 10) break;
+			system("ecams_querecv 1>/dev/null 2>&1 &");
+			sleep (3);
+		}
+		*/
+		/*-------------------------------------------------------*/
+		/*		7일전 처리결과 로그정리                          */
+		/*-------------------------------------------------------*/
+		EXEC SQL DECLARE  CheckProc_cursor CURSOR FOR
+	    	SELECT  A.CM_DELCD
+	    	      , B.CM_PATH
+	    	      , TO_CHAR(SYSDATE, 'D')
+	    	      , A.CM_DELTERM * (DECODE(RTRIM(A.CM_TERMCD), '1',   1
+	    	                                                 , '2',   7
+	    	                                                 , '3',  30
+	    	                                                 , '4',  91
+	    	                                                 , '5', 182
+	    	                                                 , '6', 365
+	    	                              )
+	    	                        )
+	    	      , B.CM_DOWNIP
+	    	      , B.CM_DOWNPORT
+	    	      , A.CM_BACKPATH
+	    	      , A.CM_GBNCD
+	          FROM  CMM0013 A
+	              , CMM0012 B
+	              , CMM0020 C
+	         WHERE  A.CM_STNO = 'ECAMS'
+	           AND  RTRIM(A.CM_DELCD)  = RTRIM(B.CM_PATHCD)
+	           AND  RTRIM(A.CM_STNO)   = RTRIM(B.CM_STNO)
+	           AND  RTRIM(C.CM_MACODE) = 'DBTERM'
+	           AND  RTRIM(C.CM_MICODE) =RTRIM(A.CM_TERMCD)
+	           AND  C.CM_MICODE <> '****'
+	           AND  ('0500' < TO_CHAR(SYSDATE,'HH24MI')
+	           AND  TO_CHAR(NVL(A.CM_AGENTDATE, SYSDATE-1), 'YYYYMMDD') < TO_CHAR(SYSDATE,'YYYYMMDD'));
+
+		fetchcnt = 0;
+
+		EXEC SQL open CheckProc_cursor;
+
+	    while (1) {
+			memset(szTarIp, 0x00, sizeof(szTarIp));
+
+     	    EXEC SQL FETCH  CheckProc_cursor
+        		INTO  :szDelcd
+        			, :szTmpPath
+        			, :issunday
+        			, :Log_Del_Jugi
+        			, :szTarIp
+        			, :szTarPort
+        			, :szBackPath
+        			, :szGbnCD;
+
+			if (sqlca.sqlcode == 1403) break;
+
+            if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+		   		sprintf (MyLog, "CheckProcStep SQL ERROR  1 %s\n", sqlca.sqlerrm.sqlerrmc);
+		   		DebugLog(MyLog, bLog);
+		   		EXEC SQL COMMIT WORK RELEASE;
+				ConnectDB("ECAMS");
+		        return;
+			}
+			fetchcnt ++;
+			NotUseDataTruncate(szDelcd   , 0x20);
+		    NotUseDataTruncate(szTmpPath , 0x20);
+		    NotUseDataTruncate(issunday  , 0x20);
+		    NotUseDataTruncate(szTarIp   , 0x20);
+		    NotUseDataTruncate(szBackPath, 0x20);
+		    NotUseDataTruncate(szGbnCD   , 0x20);
+
+            if (strlen(szTmpPath) > 5) {
+               	File_Maint(szTmpPath, Log_Del_Jugi);
+			}
+
+			/*---------------------------------------------------*/
+		    /*   Agent 체크 시간 변경                            */
+		    /*---------------------------------------------------*/
+			EXEC SQL
+				UPDATE  CMM0013
+				   SET  CM_AGENTDATE = SYSDATE
+				 WHERE  CM_STNO  = 'ECAMS'
+				   AND  CM_DELCD = :szDelcd;
+
+			EXEC SQL COMMIT;
+		}
+		EXEC SQL close CheckProc_cursor ;
+
+		if (fetchcnt > 0){
+			/*---------------------------------------------------*/
+		    /*   부재기간 시작/종료건에 대한 처리                */
+		    /*---------------------------------------------------*/
+			EXEC SQL EXECUTE
+			     BEGIN
+			        DAEGYUL_UPDT;
+			     END;
+			END-EXEC;
+				
+
+			/*-------------------------------------------------------*/
+			/* 	환경설정 정보에서 사용ID잠금기준일/로그인이력보관기간                   */
+			/*-------------------------------------------------------*/			
+			EXEC SQL
+			   SELECT CM_LOCKBASEDT
+			        , CM_LOGHISP
+			    INTO  :szLockBaseDt
+			        , :szLogHisP
+			    FROM  CMM0010
+			   WHERE  CM_STNO = 'ECAMS';
+
+			NotUseDataTruncate(szLockBaseDt   , 0x20);
+		    NotUseDataTruncate(szLogHisP      , 0x20);
+
+			   
+			nLockDay   = atoi(szLockBaseDt);
+			nSaveTerm  = atoi(szLogHisP);
+			
+			/*-------------------------------------------------------*/
+			/* 	일정기간 로그인하지 않은 사용자ID 자동잠금           */
+			/*-------------------------------------------------------*/
+			EXEC SQL
+			   UPDATE CMM0040
+			      SET CM_ACTIVE='0'
+			    WHERE CM_ACTIVE='1'
+			      AND NVL(CM_LOGINDT,CM_CREATDT) < SYSDATE - :nLockDay;
+			EXEC SQL COMMIT;	
+			
+			/*---------------------------------------------------*/
+			/*  일정기간이상 지난 사용자로그인이력 삭제          */
+			/*---------------------------------------------------*/	    
+			EXEC SQL 
+			   DELETE FROM CMM0048
+			   WHERE CM_LOGINDT < SYSDATE - :nSaveTerm;		
+		    EXEC SQL COMMIT;
+		    
+		    if (strcmp(szSysGbn,"REAL") == 0) {
+			    system("prockillweb");
+			    while (1) {
+					sprintf(syscmd, "procckweb");
+					ret = system(syscmd)/256;
+					if (ret == 0) break;
+					sleep (3);
+				}			
+				system("startweb.sh");
+			}
+		}	
+				
+		/*-------------------------------------------------------*/
+		/* 	환경디렉토리 자동생성 및 권한부여                    */
+		/*-------------------------------------------------------*/		
+		diffcnt = 0;		
+		EXEC  SQL  
+			SELECT  COUNT(*)
+			  INTO  diffcnt
+			  FROM  CMM0010
+			 WHERE  TO_CHAR(NVL(CM_CMSDATE,SYSDATE-31),'YYYYMM')<>TO_CHAR(SYSDATE,'YYYYMM')
+			  AND   CM_STNO='ECAMS';
+            
+		if (sqlca.sqlcode != 0) {
+			diffcnt = 0;
+		}
+		
+		if (diffcnt > 0){
+			EXEC SQL DECLARE  CheckPath_cursor CURSOR FOR
+		    	SELECT  CM_PATH
+		    	      , CM_PATHCD
+		    	      , TO_CHAR(SYSDATE,'YYYY')
+		    	      , TO_CHAR(SYSDATE,'MM')
+		          FROM  CMM0012
+		         WHERE  CM_STNO = 'ECAMS'
+		           AND  CM_PATHCD IN ('21','23');
+	
+			fetchcnt = 0;
+	
+			EXEC SQL open CheckPath_cursor;
+	
+		    while (1) {
+				memset(sysPath   , 0x00, sizeof(sysPath));
+				memset(sysPathCd , 0x00, sizeof(sysPathCd));
+				memset(sysDayYYYY, 0x00, sizeof(sysDayYYYY));
+				memset(sysDayMM, 0x00  , sizeof(sysDayMM));
+	
+	     	    EXEC SQL FETCH  CheckPath_cursor
+	        		INTO  :sysPath
+	        			, :sysPathCd
+	        			, :sysDayYYYY
+	        			, :sysDayMM;
+	
+				if (sqlca.sqlcode == 1403) break;
+	
+	            if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			   		sprintf (MyLog, "Systemp Path Make SQL ERROR  %s\n", sqlca.sqlerrm.sqlerrmc);
+			   		DebugLog(MyLog, bLog);
+			   		EXEC SQL COMMIT WORK RELEASE;
+					ConnectDB("ECAMS");
+			        return;
+				}
+	
+				NotUseDataTruncate(sysPath    , 0x20);
+			    NotUseDataTruncate(sysPathCd  , 0x20);
+			    NotUseDataTruncate(sysDayYYYY , 0x20);
+			    NotUseDataTruncate(sysDayMM   , 0x20);
+				
+				if (strcmp(sysPathCd,"23") == 0) {
+					if (strcmp(sysDayMM,"01") == 0) {
+						sprintf(sysPath,"%s/%s",sysPath,sysDayYYYY);
+					} else {
+						memset(sysPath   , 0x00, sizeof(sysPath));	
+					}							
+				} else {
+					sprintf(sysPath,"%s/%s%s",sysPath,sysDayYYYY,sysDayMM);
+				}	
+				if (strlen(sysPath)>0) {
+					if (access(sysPath, F_OK) != 0) {
+						Local_Dir_Make(sysPath);
+					}
+					sprintf(syscmd,"chmod -R 777 %s",sysPath);
+					system(syscmd)/256;
+					
+				    EXEC SQL
+					     UPDATE CMM0010
+					        SET CM_CMSDATE=SYSDATE
+					       WHERE CM_STNO='ECAMS';
+				   EXEC SQL COMMIT;
+				}
+			}
+			EXEC SQL close CheckPath_cursor ;
+		}	
+		/*-------------------------------------------------------*/
+		/* 	Agent check 시간이 없다면                            */
+		/*-------------------------------------------------------*/
+		if (strlen(gAgentDtTime) == 0) {
+		    Agent_Check ();
+		}
+		else  {
+			/*---------------------------------------------------*/
+			/* 	Agent check 시간이 있다면                        */
+	        /*	gAgentMM=Trunc(현재시간 - AgentCheck시간 * 1440) */
+	        /*---------------------------------------------------*/
+	        EXEC SQL
+			    SELECT  TRUNC((SYSDATE - TO_DATE(:gAgentDtTime, 'YYYYMMDDHH24MISS') ) * 1440)
+		          INTO  :gAgentMM
+		          FROM  DUAL;
+
+		    if (sqlca.sqlcode != 0) return;
+
+		    /*---------------------------------------------------*/
+		    /* 	gAgent Check Time이 10분이 넘었다면              */
+		    /*---------------------------------------------------*/
+    	    if (gAgentMM > _AgtLimit) {
+			    /*-----------------------------------------------*/
+			    /* 각 시스템 Agent Check			             */
+			    /*-----------------------------------------------*/
+				Agent_Check ();
+		    }
+		}
+    
+		CMR1000_Check (); 			/* 변경신청 처리대상 Check   */
+		sleep(2);
+    } /* End while(1) */
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Agent_Check                                      */
+/*	Action    : 처리결과 Maintance                               */
+/*	Parameter : 없슴                                             */
+/*	Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void	Agent_Check	( void
+					)
+{
+char	SysCmd                     [100]; /* 시스템 명령문       */
+int     ret = 0;
+
+    sprintf (MyLog, "Agent_Check start \n");
+    DebugLog(MyLog, bLog);
+
+	sprintf(SysCmd, "%s", "ecams_svrck > /dev/null &");
+	system (SysCmd);
+
+	EXEC  SQL
+   		SELECT  TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS')
+          INTO  :gAgentDtTime
+	  	  FROM  DUAL;
+
+	if (sqlca.sqlcode != 0)
+	    return;
+
+	NotUseDataTruncate (gAgentDtTime, 0x20);
+
+
+    sprintf (MyLog, "Agent_Check end  \n");
+    DebugLog(MyLog, bLog);    
+	
+	if (strcmp(szSysGbn,"REAL") == 0) {	
+		ret = system("procck ecams_ckmgr") / 256;
+		if (ret == 0)
+			system("ecams_ckmgr 1>/dev/null 2>&1 & ");
+		sprintf(SysCmd,"procck2 ecams_sendmsg %s",szSysGbn);	
+		ret = system(SysCmd) / 256;
+		if (ret == 0) {
+			sprintf(SysCmd,"ecams_sendmsg %s 1>/dev/null 2>&1 & ",szSysGbn);
+			system(SysCmd);
+		}
+	} 
+}
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : CMR1000_Check                                    */
+/*	Action    : 변경신청 처리대상 Check                          */
+/*  Parameter : 없슴                                             */
+/*  Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void	CMR1000_Check	(
+						)
+{
+EXEC SQL BEGIN DECLARE SECTION;
+  int    befcnt                         ; /* 선행작업건수        */
+  char	 t_acptno             [dfAcptNo]; /* 접수번호            */
+  char	 t_sysid               [dfSysCD]; /* 시스템 ID           */
+  char   systime                    [16]; /* 시스템 시간         */
+  char   t_SignTime1                [15]; /* 정상처리 시작시간   */
+  char   t_SignTime2                [15]; /* 정상처리 종료시간   */
+  char   gSignTime                  [16]; /* 처리가능일시        */
+  char   t_ConfTeam                 [40]; /* 처리 단계           */
+  char   t_SysFc1             [dfSysFc1]; /* 체크아웃구분        */
+  int	 t_prccnt                       ;
+/*  char   t_stopyn                    [2]; *//*시스템통제           *//*2014.02.24*/
+EXEC SQL END DECLARE SECTION;
+
+int   SV_Skip                           ; /* 처리대상여부        */
+char  gPassOK                      [1+1]; /* 처리구분            */
+				                          /*   0 : 일반처리      */
+				                          /*   1 : 당일처리      */
+				                          /*   2 : 긴급처리      */
+char  gGyulJae                     [1+1]; /* 처리구분            */
+				                          /*   * : 대기          */
+				                          /*   1 : 우선적용      */
+int   nCnt                              ; /* 관련작업확인용 Work */
+char  SysCmd[256];
+int   retval;
+
+
+    sprintf (MyLog, "CMR1000_Check start  \n");
+    DebugLog(MyLog, bLog);
+ 
+
+    /*-----------------------------------------------------------*/
+    /* 처리대상 Read                                             */
+    /* (미종료 상태이고 결재단계가 시스템 처리인경우)            */
+    /*  - 반출처리중, Comp/Compare중,  Real Cooy등               */
+    /*-----------------------------------------------------------*/
+    EXEC SQL DECLARE CMR1000_cursor cursor for
+		SELECT  A.CR_ACPTNO
+			  , A.CR_QRYCD
+			  , A.CR_PASSOK
+			  , A.CR_GYULJAE
+			  , C.CR_TEAM
+			  , A.CR_SYSCD
+			  , B.CM_SYSFC1
+			  , B.CM_PRCCNT
+		  FROM  CMR9900 C
+		  	  , CMR1000 A
+		  	  , CMM0030 B
+		 WHERE  (   (     C.CR_TEAM   NOT IN ('SYSAR','SYSCN')
+		             AND  A.CR_STATUS NOT IN ('3', '8', '9')
+		             AND  A.CR_PRCDATE IS NULL
+		            )
+		  		 OR (C.CR_TEAM IN ('SYSAR','SYSCN'))
+		  	    )
+		   AND  A.CR_ACPTNO = C.CR_ACPTNO
+		   AND  C.CR_LOCAT  = '00'
+		   AND  C.CR_STATUS = '0'
+		   AND  C.CR_TEAMCD = '1'
+		   AND  SUBSTR(C.CR_TEAM,1,3) = 'SYS'
+		   AND  C.CR_TEAM NOT IN ('SYSPDN','SYSPUP','SYSFMK','SYSEDN','SYSEUP','SYSENC')
+		   AND  A.CR_SYSCD = B.CM_SYSCD
+		   AND  TIMECHECK(c.CR_Team,a.cr_passok, a.CR_Acptno , a.CR_PRCREQ , B.CM_SYSTIME ,A.CR_GYULJAE,A.CR_SYSCD,B.CM_SYSINFO) = 0
+		 ORDER  BY  A.CR_LASTDATE;
+
+    memset (t_acptno  , 0x00, sizeof (t_acptno  ));
+    memset (t_ConfTeam, 0x00, sizeof (t_ConfTeam));
+    memset (t_SysFc1  , 0x00, sizeof (t_SysFc1  ));
+
+    EXEC SQL open CMR1000_cursor;
+    while (1) {
+   		EXEC SQL FETCH  CMR1000_cursor
+   			INTO  :t_acptno
+   				, :gQryCD
+   				, :gPassOK
+   				, :gGyulJae
+   				, :t_ConfTeam
+   				, :t_sysid
+   				, :t_SysFc1
+   				, :t_prccnt;
+
+		if (sqlca.sqlcode == 1403) break;
+		
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+		   sprintf (MyLog, "CMR1000_Check SQL ERROR  1 %s\n", sqlca.sqlerrm.sqlerrmc);
+		   DebugLog(MyLog, bLog);
+		   EXEC SQL COMMIT WORK RELEASE;
+		   ConnectDB("ECAMS");
+   return;
+	
+        }
+
+		NotUseDataTruncate(t_acptno  , 0x20);
+        NotUseDataTruncate(gQryCD    , 0x20);
+        NotUseDataTruncate(gPassOK   , 0x20);
+        NotUseDataTruncate(gGyulJae  , 0x20);
+        NotUseDataTruncate(t_ConfTeam, 0x20);
+        NotUseDataTruncate(t_sysid   , 0x20);
+        NotUseDataTruncate(t_SysFc1  , 0x20);
+
+        forkmaxnum = t_prccnt;
+        strcpy(szSysCD,t_sysid);
+/* 2014.02.24 SYSSTOP_CHECK 사용 안함         
+        if (strcmp(t_stopyn,"Y") == 0) {
+			sprintf(MyLog,"MGR [%s][%s][%s] 시스템 통제시간 continue\n",t_acptno,t_ConfTeam,t_sysid);
+			DebugLog (MyLog,bLog);
+			continue;
+    	}	*/
+		sprintf(MyLog,"MGR		Fetch t_acptno=%s, gQryCD=%s, gPassOK=%s, gGyulJae=%s, t_ConfTeam=%s, t_t_SysFc1=%s \n",
+				t_acptno, gQryCD, gPassOK, gGyulJae, t_ConfTeam, t_SysFc1);
+		DebugLog (MyLog,bLog);
+
+		befcnt = 0;
+		if (memcmp(t_ConfTeam, "SYSED", 5) == 0 && memcmp(gPassOK,"6",1) == 0){
+			sprintf(MyLog,"MGR [%s][%s][%s] 사용자 배포처리 continue\n",t_acptno,t_ConfTeam,gPassOK);
+			DebugLog (MyLog,bLog);
+	        continue;
+		}
+
+        if (memcmp(t_ConfTeam, "SYSCB", 5) == 0 ||
+        	memcmp(t_ConfTeam, "SYSPC", 5) == 0 ||
+        	memcmp(t_ConfTeam, "SYSUA", 5) == 0 ||
+        	memcmp(t_ConfTeam, "SYSED", 5) == 0 ||
+        	memcmp(t_ConfTeam, "SYSRC", 5) == 0) {
+			befcnt = CMR1030_Check (t_acptno, t_ConfTeam);
+
+			if (befcnt > 0) {
+				sprintf(MyLog,"MGR		CMR1000_Check() CMR1030에 선행작업 있음 befcnt[%d] continue\n",befcnt);
+				DebugLog (MyLog,bLog);
+	        	continue;
+			}
+		}
+
+		/*-------------------------------------------------------*/
+		/* 	관련신청건중 등록대기 설정된 건이 있다면             */
+		/*	- nCnd = 조회결과 수                                 */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+			SELECT  COUNT(*)
+    	      INTO  :nCnt
+        	  FROM  CMR1000
+             WHERE  CR_Acptno IN (SELECT  CR_RelatNo
+	 		               	        FROM  CMR1050
+						           START  WITH  CR_AcptNo = :t_acptno
+					             CONNECT  BY  PRIOR  CR_RelatNo = CR_AcptNo
+			                       UNION
+			                      SELECT  CR_AcptNo
+			                        FROM  CMR1050
+				                   START  WITH  CR_RelatNo = :t_acptno
+			    	             CONNECT  BY  PRIOR  CR_AcptNo = CR_RelatNo)
+	           AND  CR_PrcDate IS NULL
+    	       AND  CR_Status != '3'
+    	       AND  CR_GYULJAE = '*';
+    	       
+        /*-------------------------------------------------------*/
+        /* 현재일시                                              */
+        /*-------------------------------------------------------*/
+        Get_Sys_Time (systime);
+	    NotUseDataTruncate(systime, 0x20);
+
+		/*-------------------------------------------------------*/
+		/* 	작업대기이면 처리보류                                */
+		/*-------------------------------------------------------*/
+		memset(gSignTime, 0x00, sizeof(gSignTime));
+        if (memcmp(gGyulJae, "*", 1) == 0 || nCnt > 0 ) {
+			sprintf(MyLog,"MGR		CMR1000_Check() 작업대기임 gGyulJae[%s] || nCnt[%d] continue\n",
+								gGyulJae,nCnt);
+			DebugLog (MyLog,bLog);
+			SV_Skip = 1;
+        }
+
+        /*-------------------------------------------------------*/
+        /* 	우선적용이면 즉시 처리                               */
+        /*-------------------------------------------------------*/
+        else if (memcmp(gGyulJae, "1", 1) == 0) {
+           SV_Skip = 0;
+        }
+        else
+        if (memcmp(t_ConfTeam, "SYSCB", 5) != 0 &&
+        	memcmp(t_ConfTeam, "SYSPC", 5) != 0 &&
+        	memcmp(t_ConfTeam, "SYSUA", 5) != 0 &&
+        	memcmp(t_ConfTeam, "SYSGB", 5) != 0 &&
+        	memcmp(t_ConfTeam, "SYSRC", 5) != 0 &&
+        	memcmp(t_ConfTeam, "SYSED", 5) != 0 ) {
+           SV_Skip = 0;
+        }
+        
+        else
+        if (memcmp(t_ConfTeam, "SYSED", 5) == 0 &&
+        	memcmp(gPassOK   , "2"    , 1) == 0 ) {
+        	SV_Skip = 0;
+        }
+        
+        else {
+			EXEC SQL
+				SELECT  NVL(CM_STTIME,'0000')
+				      , NVL(CM_EDTIME,'0000')
+				  INTO  :t_SignTime1
+				      , :t_SignTime2
+				  FROM  CMM0014
+				 WHERE  CM_STNO   = 'ECAMS'
+				   AND  CM_TIMECD = '03';
+
+			NotUseDataTruncate (t_SignTime1, 0x20);
+			NotUseDataTruncate (t_SignTime2, 0x20);
+
+			if (memcmp(t_SignTime1, t_SignTime2, 4) == 0)
+				SV_Skip = 0;
+			else
+			if (memcmp(t_SignTime1, t_SignTime2, 4) < 0) {
+			    if (memcmp(t_SignTime1, systime, 4) > 0 ||
+			    	memcmp(t_SignTime2, systime, 4) < 0 ) {
+					sprintf(MyLog,"MGR		CMR1000_Check() 처리시간 아님 sSignTime[%s]  \n",gSignTime);
+					DebugLog (MyLog,bLog);
+			    	SV_Skip = 1;
+				}
+				else
+					SV_Skip = 0;
+			}
+			else {
+			    if (memcmp(t_SignTime1, systime, 4) < 0 &&
+			    	memcmp(t_SignTime2, systime, 4) > 0 ) {
+					sprintf(MyLog,"MGR		CMR1000_Check() 처리시간 아님 sSignTime[%s]  \n",gSignTime);
+					DebugLog (MyLog,bLog);
+			    	SV_Skip = 1;
+				}
+				else
+					SV_Skip = 0;
+			}
+		}
+
+
+		t_acptno [12] = 0x00;
+		sprintf (gAcptNo, "%s", t_acptno);
+
+    	memset (p_ConfTeam, 0x00, sizeof(p_ConfTeam));
+    	memset (p_SysFc1  , 0x00, sizeof(p_SysFc1  ));
+		sprintf(p_ConfTeam, "%s", t_ConfTeam);
+		sprintf(p_SysFc1  , "%s", t_SysFc1  );
+    		
+		/*-------------------------------------------------------*/
+		/* 	처리단계 조회 및 신청구분별 처리대상 Check           */
+		/*-------------------------------------------------------*/
+		CMR9900_Check (SV_Skip, gPassOK);
+    }
+    EXEC SQL COMMIT;
+    EXEC SQL close CMR1000_cursor ;
+
+    sprintf (MyLog, "CMR1000_Check end \n");
+    DebugLog(MyLog, bLog);
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : CMR1030_Check                                    */
+/*	Action    : 신청건에대한 선행작업 미완료건수 체크            */
+/*	Parameter : t_acptno  : 신청번호                             */
+/*		        gConfTeam : 처리단계                             */
+/*	Return    : 선행우선처리 대상 건수                           */
+/*---------------------------------------------------------------*/
+int   CMR1030_Check 	( char *t_acptno
+						, char *gConfTeam
+						)
+{
+int   befcnt ;
+
+
+    sprintf (MyLog, "CMR1030_Check start [%s]  \n",t_acptno);
+    DebugLog(MyLog, bLog);
+
+	befcnt = 0;
+	/*-----------------------------------------------------------*/
+	/*  선행작업 체크                                            */
+	/*  1. 현재 처리하려는 단계에 대해서 선행작업 완료여부 체크  */
+	/*  2. 선행작업 반송여부 체크                                */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  SUM(CNT)
+		  INTO  :befcnt
+		  FROM  (SELECT  COUNT(*) CNT
+		           FROM  CMR1030 A
+		               , CMR9900 B
+		          WHERE  A.CR_ACPTNO = :t_acptno
+		            AND  A.CR_BEFACT = B.CR_ACPTNO
+		            AND  B.CR_LOCAT <> '00'
+		            AND  B.CR_STATUS = '0'
+		            AND  B.CR_TEAMCD = '1'
+		            AND  B.CR_TEAM   = :gConfTeam
+		          UNION
+		         SELECT  COUNT(*) CNT
+		           FROM  CMR1030 A
+		               , CMR1000 B
+		          WHERE  A.CR_ACPTNO = :t_acptno
+		            AND  A.CR_BEFACT = B.CR_ACPTNO
+		            AND  B.CR_STATUS = '3'
+		        );
+
+	sprintf (MyLog, "CMR1030_Check end [%s][%d] \n",t_acptno,befcnt);
+    DebugLog(MyLog, bLog);
+
+  	return (befcnt);
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : CMR9900_Check                                    */
+/*	Action    : 처리단계 조회 및 신청구분별 처리대상 Check       */
+/*	Parameter : SV_Skip   : 처리여부 ('1':SKIP, '0':처리)        */
+/*	            t_passok  : 일반/당일/긴급 처리구분              */
+/*	Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void	CMR9900_Check	( int   SV_Skip
+						, char *t_passok
+						)
+{
+
+    sprintf (MyLog, "CMR9900_Check start  \n");
+    DebugLog(MyLog, bLog);
+
+
+    /*-----------------------------------------------------------*/
+    /* 처리단계별 수행                                           */
+    /* Compile, Link  Check 후 작업토록 처리.                    */
+    /*-----------------------------------------------------------*/
+   if (memcmp (p_ConfTeam, "SYS", 3) == 0) {
+		if (SV_Skip == 0) {
+			CMR1010_Check (t_passok);
+		}
+		else {
+			sprintf(MyLog,"MGR		CMR9900_Check() skip됨 SV_Skip[%d], p_ConfTeam[%s] \n", SV_Skip, p_ConfTeam);
+			DebugLog (MyLog,bLog);
+		}
+    }
+	else {
+		sprintf(MyLog,"MGR		CMR9900_Check() p_ConfTeam이 SYS가 아님 p_ConfTeam[%s] \n",p_ConfTeam);
+		DebugLog (MyLog,bLog);
+	}
+    EXEC SQL COMMIT;
+
+    sprintf (MyLog, "CMR9900_Check end  \n");
+    DebugLog(MyLog, bLog);
+
+    return;
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : CMR1010_Check                                    */
+/*	Action    : 프로그램 신청 (Check-IN/Check-OUT) Check         */
+/*	Parameter : pPassOk : 시스템구분                          */
+/*	Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void 	CMR1010_Check 	( char *pPassOk
+						){
+
+char	szConfTeam                [10+1];
+char	chk_IP                 [dfSvrIP];
+int		chk_Port                        ;
+ulong	ul_servip                       ;
+int		sockid                          ;
+int		errcnt = 0                      ;
+char	szSYSFC1              [dfSysFc1];
+char	chk_qrycd              [dfReqCD];
+char	chk_svrcd              [dfSvrCD];
+char    szPfmYN                      [2];
+int 	i                               ;
+int		chkflag                         ;
+
+
+    sprintf(MyLog, "%s", "MGR		CMR1010_Check Started\n");
+    DebugLog (MyLog,bLog);
+
+    /*-----------------------------------------------------------*/
+    /*     신청자원 처리  Process Fork                           */
+    /*-----------------------------------------------------------*/
+    /* 2014. 02.24 PFMCHECK 삭제 */
+	EXEC SQL
+		SELECT  B.CR_TEAM            /*, PFMCHECK(B.CR_ACPTNO)*/
+		  INTO  :szConfTeam          /*, :szPfmYN             */
+		  FROM  CMR1010 A
+		      , CMR9900 B
+		      , CMM0030 C
+		 WHERE  A.CR_ACPTNO = :gAcptNo
+		   AND  A.CR_ACPTNO = B.CR_ACPTNO
+		   AND  B.CR_LOCAT  = '00'
+		   AND  B.CR_STATUS = '0'
+		   AND  B.CR_TEAMCD = '1'
+		   AND  SUBSTR(B.CR_TEAM,1,3) = 'SYS'
+		   AND  (    (     B.CR_TEAM NOT IN ('SYSAL','SYSCN','SYSRM')
+		              AND  A.CR_PRCDATE IS NULL
+		             )
+		  		 OR  B.CR_TEAM IN ('SYSAL','SYSCN','SYSRM')
+		  	    )
+		   AND  (     A.CR_PID   IS NULL
+		         AND  NVL(A.CR_PUTCODE, 'RTRY') = 'RTRY'
+		        )
+		   AND  C.CM_SYSCD = A.CR_SYSCD
+		   AND  ROWNUM = 1;
+
+	if (sqlca.sqlcode != 0) {
+		return;
+	}
+
+	NotUseDataTruncate (szConfTeam, 0x20);
+	NotUseDataTruncate (szPfmYN, 0x20);
+
+	sprintf(MyLog,"MGR	CMR1010 CHECK : [%s] [%s]\n" , gAcptNo, szConfTeam);
+	DebugLog (MyLog,bLog);
+
+
+	EXEC SQL
+		SELECT  A.CR_QRYCD
+		      , B.CM_SYSFC1
+		  INTO  :chk_qrycd
+		  	  , :szSYSFC1
+          FROM  CMR1000 A
+              , CMM0030 B
+         WHERE  A.CR_ACPTNO = :gAcptNo
+           AND  A.CR_SYSCD  = B.CM_SYSCD;
+
+	if (sqlca.sqlcode != 0) {
+		return;
+	}
+
+	NotUseDataTruncate(szSYSFC1 , 0x20);
+	NotUseDataTruncate(chk_qrycd, 0x20);
+
+	chkflag = 1;
+
+	if (strcmp(szConfTeam, "SYSDN") == 0 &&
+		strcmp(szConfTeam, "CP"   ) != 0 ) {
+		strcpy(chk_svrcd, "01");
+		chkflag = 1;
+	}
+/* 2014.02.24 PFMCHECK 관련 삭제 
+	else
+	if (strcmp(szConfTeam,"SYSPF") == 0 && strcmp(szPfmYN,"Y") == 0) {
+		strcpy(chk_svrcd,"01");
+		chkflag = 1;
+	}
+*/
+	else
+	if (strcmp(szConfTeam,"SYSUP") == 0) {
+		strcpy(chk_svrcd,"01");
+		chkflag = 1;
+	}
+	else
+	if (strcmp(szConfTeam,"SYSED") == 0) {
+		if (strcmp(chk_qrycd,"07") == 0) {
+			strcpy(chk_svrcd, "25");
+		} else if (strcmp(chk_qrycd,"03") == 0) {
+			strcpy(chk_svrcd,"15");
+		}
+		else {
+			strcpy(chk_svrcd,"05");
+		}
+		chkflag = 1;
+	}
+	else
+	if (strcmp(szConfTeam,"SYSCB") == 0) {
+		if (strcmp(chk_qrycd,"07") == 0) {
+			strcpy(chk_svrcd, "23");
+		} else if (strcmp(chk_qrycd,"03") == 0)
+			strcpy(chk_svrcd, "13");
+		else
+			strcpy(chk_svrcd, "03");
+
+		chkflag = 1;
+	}
+	else {
+		chkflag = 0;
+	}
+
+	if (chkflag == 1) {
+		EXEC SQL DECLARE Chk_Agent1 CURSOR FOR
+			SELECT  DISTINCT
+			        A.CM_SVRIP
+			      , A.CM_PORTNO
+			  FROM  CMM0031 A
+			      , CMM0038 B
+			      , CMR1010 C
+			 WHERE  C.CR_ACPTNO  = :gAcptNo
+		       AND  C.CR_SYSCD   = A.CM_SYSCD
+			   AND  A.CM_SVRCD   = :chk_svrcd
+			   AND  A.CM_SYSCD   = B.CM_SYSCD
+			   AND  A.CM_SEQNO   = B.CM_SEQNO
+			   AND  A.CM_SVRCD   = B.CM_SVRCD
+			   AND  B.CM_RSRCCD  = C.CR_RSRCCD
+			   AND  A.CM_SVRSTOP = 'N'
+			   AND  A.CM_CLOSEDT IS NULL;
+
+		errcnt = 0;
+		EXEC SQL open Chk_Agent1;
+		while (1) {
+	    	EXEC SQL FETCH  Chk_Agent1
+	    		INTO  :chk_IP
+	    			, :chk_Port;
+
+			if (sqlca.sqlcode == 1403) 	break;
+
+			NotUseDataTruncate(chk_IP,	0x20);
+
+			ul_servip = CvtIPchr2ulong (chk_IP);
+			sockid = ConnectClient2Server (chk_Port,ul_servip);
+			if (sockid == -1) {
+		   		sprintf (MyLog, "CMR1010_Check ConnectClient2Server Fail [%s] %s [%d]\n", gAcptNo, chk_IP, sockid);
+		   		DebugLog(MyLog, bLog);
+
+				errcnt++;
+    		    continue;
+			}
+			DisConnectSocket (sockid);
+		}
+		EXEC SQL close Chk_Agent1;
+
+		if (errcnt != 0)	return;
+	}
+	
+	eCAMS_Acct_Fork (szConfTeam);
+
+    sprintf(MyLog, "%s", "MGR		CMR1010_Check end\n");
+    DebugLog (MyLog,bLog);
+
+    return;
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : eCAMS_Acct_Fork                                  */
+/*	Action    : 시스템별 Acct Fork                               */
+/*	Parameter : PrcSys : 처리단계                                */
+/*	Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void	eCAMS_Acct_Fork	( char *PrcSys
+						)
+{
+int 	ret                             ; /* excel 처리결과      */
+char	fullpath            [dfFullPath];
+char	filename            [dfRsrcName]; /* 처리 프로그램 Name  */
+int 	retval                          ; /* 시스템명령 처리결과 */
+char	SysCmd                     [512]; /* Process Check용 Work*/
+int		nCnt                            ;
+int		nullItemCnt                     ;
+int		befprocCnt                      ;
+int     seqprocCnt                      ;
+char	strQuery                  [4000];
+int 	MaxITEMID;
+char wkPrcSys                [20];	
+	
+     /* 시스템내 모든 건 순차처리여부 확인  */
+     sprintf(MyLog, "MGR		eCAMS_Acct_Fork  Started [%s][%s] \n", gAcptNo,PrcSys);
+	DebugLog (MyLog,bLog);
+	
+	sprintf(filename, "%s", "ecams_acct");
+	
+	if (memcmp(PrcSys, "SYSCB",5) == 0) {
+	  	EXEC SQL
+			SELECT COUNT(*)
+			  INTO :seqprocCnt
+			  FROM CMM0036 c,CMR1010 b
+			 WHERE b.CR_ACPTNO= :gAcptNo
+			   AND b.CR_STATUS='0'
+			   AND b.CR_SYSCD=c.CM_SYSCD
+			   AND b.CR_RSRCCD=c.CM_RSRCCD
+			   AND SUBSTR(c.CM_INFO,16,1)='1' ;
+
+		if (sqlca.sqlcode != 0) {
+			 seqprocCnt = 0;
+		}
+		if (seqprocCnt > 0) {
+			EXEC SQL
+				SELECT COUNT(*)
+				  INTO :seqprocCnt
+				  FROM CMM0036 c,CMR1010 b,CMR9900 d,CMR1000 a
+				 WHERE a.cr_status='0'
+				   and a.cr_qrycd=substr(:gAcptNo,5,2)
+				   and a.cr_acptno<>:gAcptNo
+				   and a.cr_acptno=d.cr_acptno
+				   and d.cr_locat='00'
+				   and d.cr_team='SYSCB'
+				   and d.cr_status='0'
+				   and a.cr_acptno=b.cr_acptno
+				   AND b.CR_STATUS='0'
+				   AND b.CR_SYSCD=c.CM_SYSCD
+				   AND b.CR_RSRCCD=c.CM_RSRCCD
+				   AND SUBSTR(c.CM_INFO,16,1)='1' ;
+	
+			if (sqlca.sqlcode != 0) {
+				 seqprocCnt = 0;
+			}
+			if (seqprocCnt > 0) {
+				sprintf(SysCmd, "procck2 %s %s=%s%s", filename, szSysGbn,mid_char(gAcptNo,5,2),PrcSys);
+				retval = system(SysCmd)/256;
+				sprintf (MyLog, "[%s][%d]\n", SysCmd,retval);
+				DebugLog(MyLog, bLog);
+				if (retval > 0) {
+					sprintf (MyLog, "[%s][%d]\n", SysCmd,retval);
+					DebugLog(MyLog, bLog);
+					return;
+				}
+			}
+		}
+	} else {
+		seqprocCnt = 0;
+	}
+
+	sprintf(MyLog, "MGR		eCAMS_Acct_Fork  start 2 [%s] [%s] \n", gAcptNo,PrcSys);
+	DebugLog (MyLog,bLog);
+					
+	sprintf(SysCmd, "procck %s", filename);
+	retval = system(SysCmd)/256;
+	if (retval > totforkcnt) {
+		sprintf (MyLog, "[%s][%d]\n", SysCmd,retval);
+		DebugLog(MyLog, bLog);
+		return;
+	}
+    sprintf(SysCmd, "procck2 %s %s=%s%s", filename, szSysGbn,mid_char(gAcptNo,5,2),szSysCD);
+	retval = system(SysCmd)/256;
+	if (retval > forkmaxnum) {
+		sprintf (MyLog, "[%s][%d]\n", SysCmd,retval);
+		DebugLog(MyLog, bLog);
+		return;
+	}
+	if (retval > forkmaxnum) {
+		sprintf (MyLog, "[%s][%d]\n", SysCmd,retval);
+		DebugLog(MyLog, bLog);
+		return;
+	}
+	
+	sprintf(SysCmd, "procck2 %s %s", filename, gAcptNo);
+	retval = system(SysCmd)/256;
+	if (retval > 0) {
+		sprintf (MyLog, "[%s][%d]\n", SysCmd,retval);
+		DebugLog(MyLog, bLog);
+		return;
+	}
+
+	if (memcmp(PrcSys, "SYSPF",5) == 0 ||
+		memcmp(PrcSys, "SYSUP",5) == 0 ||
+		memcmp(PrcSys, "SYSPC",5) == 0 ||
+		memcmp(PrcSys, "SYSRC",5) == 0  ) {
+		nullItemCnt = 0;
+
+		EXEC SQL
+			SELECT  COUNT(*)
+			  INTO  :nullItemCnt
+			  FROM  CMR1010
+			 WHERE  CR_ACPTNO = :gAcptNo
+			   AND  CR_ITEMID IS NULL;
+
+		if (sqlca.sqlcode != 0) {
+			nullItemCnt = 0;
+		}
+
+		if (nullItemCnt > 0) {
+			EXEC SQL EXECUTE
+			     BEGIN
+			        CMR0020_Insert(:gAcptNo, :PrcSys);
+			     END;
+			END-EXEC;
+
+			if (sqlca.sqlcode != 0) {
+				sprintf (MyLog, "eCAMS_Acct_Fork ItemId Insert Err [%s][%s] [%d]\n", gAcptNo,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+		   		DebugLog(MyLog, bLog);
+
+				EXEC SQL
+					UPDATE  CMR1010
+					   SET  CR_PUTCODE = 'CR20'
+					      , CR_SYSSTEP = '0'
+					 WHERE  CR_ACPTNO = :gAcptNo;
+
+				EXEC SQL COMMIT;
+				return;
+			}
+			EXEC SQL COMMIT;
+		}
+	}
+
+	memset(SysCmd  , 0x00, sizeof(SysCmd  ));
+	memset(fullpath, 0x00, sizeof(fullpath));
+	sprintf(fullpath, "%s", filename);
+	sprintf(SysCmd, "%s %s %d %s=%s%s%s &", fullpath, gAcptNo, gSerNo,szSysGbn,mid_char(gAcptNo,5,2),szSysCD,PrcSys);
+	retval = system (SysCmd) /256;
+
+    sprintf (MyLog, "eCAMS_Acct_Fork end \n");
+    DebugLog(MyLog, bLog);
+    return;
+}
+
+
+/*---------------------------------------------------------------*/
+/*     Parent  Signal  Define                                    */
+/*---------------------------------------------------------------*/
+void DefineParentSignal ()
+{
+    int sig_num;
+
+    for (sig_num = 1; sig_num < 32; sig_num++)
+         signal (sig_num,  SIG_IGN);
+
+#ifdef _OSF_SOURCE
+    signal (SIGCLD, sig_cld);
+#else
+    signal (SIGCHLD, SIG_IGN);
+#endif
+
+    signal (SIGBUS,  ExitParentProc);
+    signal (SIGSEGV, ExitParentProc);
+    signal (SIGSYS,  ExitParentProc);
+    signal (SIGKILL, ExitParentProc);
+    signal (SIGINT,  ExitParentProc);
+    signal (SIGTERM, ExitParentProc);
+
+    return;
+}
+
+#ifdef _OSF_SOURCE
+static void sig_cld ()
+{
+    int pid, status;
+
+    while ((pid = wait3 (&status, WNOHANG, (struct rusage *)0)) > 0)
+        ;
+}
+#endif
+
+
+void ExitParentProc (sig_num)
+int sig_num;
+{
+	sprintf (MyLog, "ExitParentProc sig_num[%d]\n", sig_num);
+	DebugLog(MyLog, bLog);
+    exit (0);
+}
+
+
+/*****************************************************************/
+/*                                                               */
+/*       eCAMS_MGR  처리 MAIN  LOGIC                             */
+/*                                                               */
+/*****************************************************************/
+int		main(int argc, char **argv, char **envp)
+{
+char  	SysCmd                     [100]; /* 시스템 명령문       */
+char    stime                       [16]; /* 처리시작, 종료 시간 */
+char    etime                       [16]; /* 처리시작, 종료 시간 */
+char    Bef2Mon                     [10]; /* 3개월전 일자        */
+int		ncnt = 0                        ;
+
+    memset(szSysGbn  , 0x00, sizeof(szSysGbn  ));
+    if (argc < 2) {
+    	printf ("usage : %s <시스템구분 REAL/TEST> \n", argv[0]);
+        exit (0);
+	}
+		
+    sprintf(szSysGbn   , "%s", argv[1]);     /* 시스템구분         */
+    if (strcmp(szSysGbn,"REAL") != 0 && strcmp(szSysGbn,"TEST") != 0) {
+    	printf ("usage : %s <시스템구분을 REAL/TEST로 입력요망> \n", argv[0]);
+        exit (0);	
+	}
+
+	/*-----------------------------------------------------------*/
+	/*	MGR이 떠있나 확인 한다. (이중 MGR 금지)                  */
+	/*-----------------------------------------------------------*/
+	
+	sprintf(SysCmd, "procck2 %s %s", argv[0], szSysGbn);
+	ncnt = system(SysCmd) / 256;
+	fprintf (stderr, "ecams_mgr proccnt [%d] \n",ncnt);
+	if (ncnt > 1)
+		exit (1);
+
+	Get_Sys_Date (sysdate);
+
+	if (argc == 3)
+		bLog = atoi(argv[2]);
+	else
+		bLog = 0;
+
+    memset(gAgentDtTime, 0x00, sizeof(gAgentDtTime));
+    while (1) {
+    	gEnvp = envp;
+    	if (ConnectDB() == FALSE) {
+    		fprintf (stderr, "SQL ERROR  Connect \n");
+    		break;
+    	}
+    	else {
+			DefineParentSignal ();
+
+		    EXEC SQL
+		    	SELECT  NVL(CM_PROCTOT, 50)
+		    	  INTO  :totforkcnt
+		    	  FROM  CMM0010
+		    	 WHERE  CM_STNO = 'ECAMS';
+
+		    if (sqlca.sqlcode != 0) {
+		    	totforkcnt = 50;
+		    }
+		}
+
+	    /*-------------------------------------------------------*/
+	    /*  작업시간내에 처리작업 수행                           */
+	    /*  요일별/시간별 처리여부 Check                         */
+	    /*-------------------------------------------------------*/
+	    CheckProcStep ();
+	    
+    }
+    EXEC SQL COMMIT WORK RELEASE;
+    exit(0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : ecams_mgr Logging                                */
+/*	Parameter : LogData : Logging Data                           */
+/*	            nFlag   : Logging 여부                           */
+/*	Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+void	DebugLog	( char *LogData
+					, int   nFlag
+					)
+{
+char 	szLogFile           [dfFullPath];
+char 	szLogPath                [dfDir];
+char 	szSysTime                   [16];
+char 	szLogFullName       [dfFullPath];
+FILE 	*LogPtr                         ;
+
+
+	if (nFlag == 0) {
+		return;
+	}
+
+	Get_Sys_Date(szLogFile);
+	strcat(szLogFile,".log");
+	sprintf(szLogPath, "%s/MgrLog/", getenv("LOGDIR"));
+
+	if (access(szLogPath, F_OK) != 0)
+		Local_Dir_Make(szLogPath);
+
+	Get_Sys_Time20(szSysTime);
+
+	sprintf(szLogFullName, "%s%s", szLogPath, szLogFile);
+    LogPtr = fopen (szLogFullName, "a+");
+    if (LogPtr == (FILE *)NULL) {
+    	printf("LOG FILE OPEN ERROR = [%s]\n", szLogFullName);
+    	return;
+    }
+
+    fprintf (LogPtr, "[%s] %s\n",szSysTime, LogData);
+    fflush  (LogPtr);
+    fclose  (LogPtr);
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : File_Maint                                       */
+/*	Action    : 파일 정리                                        */
+/*	Parameter : ChkDir       : 정리대상 디렉토리                 */
+/*	            Log_Del_Jugi : 주기                              */
+/*	Return    : 0 : 정상완료, 1 : 대상없음                       */
+/*---------------------------------------------------------------*/
+int 	File_Maint	( char  *ChkDir
+					, int Log_Del_Jugi
+					)
+{
+char  SysCmd                       [100];
+char  MaintFile                    [100];
+char  FileBuf                      [256];
+char  FileDate                      [10];
+int   ret                               ;
+FILE  *FCHK                             ;
+
+
+    if (strlen(ChkDir) < 2 && strncmp(ChkDir,"/",1) == 0) {
+        return 1;
+    }
+
+	EXEC SQL
+		SELECT  TO_CHAR(SYSDATE - :Log_Del_Jugi, 'YYYYMMDD')
+		  INTO  :FileDate
+		  FROM  DUAL;
+
+	NotUseDataTruncate(FileDate, 0x20);
+
+    sprintf(SysCmd, "ecams_maint %s %s DELFILE", ChkDir, FileDate);
+    system (SysCmd);
+
+
+
+
+	return 0;
+}
+
+/*---------------------------------------------------------------*/
+/*	Function  : DrSevre_Send                                     */
+/*	Action    : Dr Server send                                   */
+/*	Parameter :                                                  */
+/*	          : 주기 오전 5시 이후 1회 전송                      */
+/*	Return    : 0 : 정상완료, 1 : 대상없음                       */
+/*---------------------------------------------------------------*/
+
+int DrServer_Send()
+{
+char  SysCmd                       [100];
+char  szBefDate                     [10];
+
+	memset(SysCmd, 0x00, sizeof(SysCmd));
+	
+	EXEC SQL
+		SELECT  TO_CHAR(SYSDATE - 1, 'YYYYMMDD')
+		  INTO  :szBefDate
+		  FROM  DUAL;
+
+	NotUseDataTruncate(szBefDate, 0x20);
+
+    sprintf(SysCmd, "ecams_drsend 00100 %s &", szBefDate);
+    system (SysCmd);
+    
+    return 0;
+}
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

@@ -1,0 +1,209 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_effsend.pc                             │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 영향분석으로 최종소스 이행 처리 MAIN         │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 10. 02                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		Structure for VARRAW                                     */
+/*---------------------------------------------------------------*/
+typedef struct
+{
+	short len;
+	char  arr[100];
+} vr;
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : ConnectDB                                        */
+/*	Action    : eCAMS  DATABASE  CONNECT                         */
+/*	Parameter : NONE                                             */
+/*	Return    : 정상 : TRUE, 오류 : FALSE                        */
+/*---------------------------------------------------------------*/
+int 	ConnectDB	(
+					)
+{
+EXEC SQL BEGIN DECLARE SECTION;
+	char	gConnStr               [256];
+EXEC SQL END DECLARE SECTION;
+char	szDBCONN	                [50];
+
+
+    memset(gConnStr, 0x00, sizeof(gConnStr));
+    memset(szDBCONN, 0x00, sizeof(szDBCONN));
+    sprintf(szDBCONN, "%s", getenv("DBCONN"));
+
+	sprintf(gConnStr, "%s/%s@%s", "COVM_IMS","godqhr!1",(char *)getenv("DBCONN"));
+	
+	EXEC SQL CONNECT :gConnStr;
+	if (sqlca.sqlcode != 0) {
+		if (strlen(gszLogFile) == 0) {
+			printf("ECAMS        ConnectDB() ERROR [%d] \n", sqlca.sqlcode);
+		} else {
+		    /*LOG*/sprintf(gszLogMsg,"ECAMS        ConnectDB() ERROR [%d] \n", sqlca.sqlcode);
+		    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		}
+	    return FALSE;
+	}
+
+	return TRUE;
+}
+
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*      계정/정보계 기존 버전자료 이행 처리  M A I N             */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char	szItemID              [dfItemID];
+char	szSysCmd            [dfFullPath];
+char	szSysCD                [dfSysCD];
+int 	retval                          ;
+CMD_INFO	CmdInfo                     ;
+
+	
+	if (argc != 2) {
+		fprintf(stderr, "Usage : %s <시스템> \n", argv[0]);
+		exit (1);
+	}
+	
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");
+
+	memset(szSysCD, 0x00, sizeof(szSysCD));
+	sprintf(szSysCD, "%s", argv[1]);
+	
+	NotUseDataTruncate (szSysCD, 0x20);
+		
+
+    /*-----------------------------------------------------------*/
+    /*   Signal Define			                                 */
+    /*-----------------------------------------------------------*/
+    DefineSignal ();
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		fprintf(stderr, "DB 연결 않됨 \n");
+		exit(1);
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", gszTempPath);
+	NotUseDataTruncate(gszTempPath,0x20);
+	if (strlen(gszTempPath) == 0) {
+		strcpy(gszTempPath,"tmp/");
+	}
+	else {
+		if (cmp_right_char(gszTempPath, 1, "/") != 0)
+	       sprintf(gszTempPath,"%s%s", gszTempPath,"/");
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   소스백업 디렉토리                                       */
+    /*-----------------------------------------------------------*/
+	SetTempDir("93", gszBackPath);
+
+
+
+	/*-----------------------------------------------------------*/
+	/*	이행대상 목록 작성                                       */
+	/*-----------------------------------------------------------*/
+	EXEC SQL DECLARE IH_Rsrc CURSOR FOR
+		SELECT  CR_SYSCD
+		      , CR_DSNCD
+		      , CR_RSRCNAME
+		  FROM  CMR0020 A
+		      , CMM0036 B
+		 WHERE  CR_SYSCD  = :szSysCD
+		   AND  CR_SYSCD  = CM_SYSCD
+		   AND  CR_RSRCCD = CM_RSRCCD
+		   AND  SUBSTR(CM_INFO, 18, 1) = '1'
+		   AND  CR_LSTVER > 0;
+		   
+	EXEC SQL open  IH_Rsrc;
+    while (1) {
+		EXEC SQL fetch IH_Rsrc
+			INTO  :szSysCD
+				, :szDsnCD
+				, :szRsrcName;
+					
+		NotUseDataTruncate (szSysCD  , 0x20);
+		NotUseDataTruncate (szDsnCD  , 0x20);
+		NotUseDataTruncate (szRsrcName, 0x20);
+
+		if (sqlca.sqlcode == 1403)	break;
+			
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"UploadSyscomRsrc DB FETCH ERROR : [%d] [%s]", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+
+		sprintf(szSysCmd, "procck4 ecams_effsend1_sub %s %s %s", szSysCD, szDsnCD, szRsrcName);
+		while (1) {
+			retval = system(szSysCmd) / 256;
+			if (retval == 0)	break;
+		}
+				
+		sprintf(szSysCmd, "%s", "procck ecams_effsend1_sub");
+		while (1) {
+			retval = system(szSysCmd) / 256;
+			if (retval < 30)	break;
+			sleep(1);
+		}
+		
+		sprintf(szSysCmd, "ecams_effsend1_sub %s %s %s &", szSysCD, szDsnCD, szRsrcName);
+		retval = system(szSysCmd) / 256;
+	}
+	EXEC SQL close IH_Rsrc;
+	
+	EXEC SQL COMMIT WORK RELEASE;
+	exit (0);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

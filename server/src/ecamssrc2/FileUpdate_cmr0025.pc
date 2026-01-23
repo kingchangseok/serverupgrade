@@ -1,0 +1,226 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ FileUpdate_cmr0025.pc                        │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ORACLE DB (CMR0025)에 Write 하는 프로그램    │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include 	<ecamsapi.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+#define FALSE 0
+#define TRUE 1
+
+#define TERM(X) ( X.arr[X.len] = '\0' )
+#define SLEN(X) ( X.len = strlen((char *)X.arr) )
+
+#define READ_SIZE 4096
+
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/* 	Function  : InsertFileToDB                                   */
+/*	Action    : 신규나 수정신청일 경우 신청건을 CMR0025에 Update */
+/*	Parameter : pItemID : 프로그램등록번호                       */
+/*	            szFile  : 파일명                                 */
+/*	            nVer    : 버전번호                               */
+/*	Return    : TRUE : 정상, FALSE : 오류                        */
+/*---------------------------------------------------------------*/
+int    InsertFileToDB ( char *pItemID
+					  , char *szFile
+					  , int   nVer
+					  )
+{
+long  	FILESIZE                        ;
+int   	res                             ;
+char  	szCmd               [dfFullPath];
+char  	szZipfile           [dfFullPath];
+my_raw  *buffer                         ;
+FILE    *fp                             ;
+char 	md5val                    [32+1];
+int		cmr0025cnt                      ;
+
+
+	struct stat f_st;
+
+	if (stat(szFile,&f_st) < 0) {
+		fprintf(stderr,"FileUpdate_cmr0025	InsertFileToDB(<%s><%s>) Insert FILE NOT FOUND  \n",pItemID,szFile);
+        return FALSE;
+	}
+
+	if (f_st.st_size == 0) {
+		fprintf(stderr,"FileUpdate_cmr0025	InsertFileToDB(<%s><%s>) Insert FILE SIZE IS ZERO  \n",pItemID,szFile);
+        return FALSE;
+	}
+	memset(md5val,0x00,sizeof(md5val));
+	res = MD5SUM(szFile,md5val);
+
+	if (res != 0) {
+		fprintf(stderr,"FileUpdate_cmr0025	InsertFileToDB(<%s><%s>) Insert File MD5SUM ERR  \n",pItemID,szFile);
+        return FALSE;
+	}
+
+	sprintf(szCmd,"cp -f '%s' '%s.zip'\n",szFile, szFile);
+	res = system(szCmd)/256;
+	if (res != 0) {
+		exit(1);
+	}
+
+	sprintf(szCmd,"ecams_zip '%s.zip'",szFile);
+	res = system(szCmd)/256;
+	if (res != 0) {
+		exit(1);
+	}
+	sprintf(szZipfile,"%s.zip.gz",szFile);
+
+	fp = fopen(szZipfile, "r");
+    if (fp == NULL ) {
+		fprintf(stderr,"ECAMS_ACCT	InsertFileToDB(<%s><%s>) Insert File OPEN ERROR  \n",pItemID,szFile);
+        return FALSE;
+    }
+    rewind(fp);
+    res = fseek(fp, 0, SEEK_END);
+    FILESIZE = ftell (fp);
+
+    buffer = (my_raw *)malloc(sizeof(my_raw) + FILESIZE);
+    memset(buffer,0x00, sizeof(my_raw) + FILESIZE);
+    res = fseek(fp, 0, SEEK_SET);
+
+    fread(buffer->arr, 1, FILESIZE, fp);
+    buffer->len = FILESIZE;
+
+	/*-----------------------------------------------------------*/
+	/*	CMR0025에 등록여부 체크                                  */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  COUNT(*)
+		  INTO  :cmr0025cnt
+		  FROM  CMR0025
+		 WHERE  CR_ITEMID = :pItemID
+		   AND 	CR_VER    = :nVer;
+
+	if (sqlca.sqlcode != 0) {
+		cmr0025cnt = 0;
+	}
+
+	if (cmr0025cnt == 0) {
+		fprintf(stderr,"[%s][%s] not found [%d] version file - cmr0025  \n",pItemID,szFile,nVer);
+        return FALSE;
+	}
+
+	/*-----------------------------------------------------------*/
+	/*	CMR0025에 파일 변경                                      */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		UPDATE  CMR0025
+		   SET  CR_FILE     = :buffer
+		   	  , CR_MD5SUM   = :md5val
+		   	  , CR_FILESIZE = :FILESIZE
+		 WHERE  CR_ITEMID = :pItemID
+		   AND  CR_VER    = :nVer;
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr,"FileUpdate_cmr0025	InsertFileToDB(<%s><%s>) [%d] UPDATE ERROR  \n",pItemID,szFile,sqlca.sqlcode);
+		EXEC SQL ROLLBACK;
+		return FALSE;
+	}
+	EXEC SQL COMMIT;
+
+    free   (buffer);
+	fclose (fp    );
+	remove (szZipfile);
+
+	return TRUE;
+}
+
+
+/*****************************************************************/
+/*                                                               */
+/*		자원소스를 DB TABLE에 저장하는 프로그램  MAIN            */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char  	action_str                 [256];
+long  	amount                          ;
+long  	offset                          ;
+short 	done                            ;
+long  	total                           ;
+char	szItemID		      [dfItemID];
+char	szFileName          [dfFullPath];
+int		inputVer                        ;
+int		szVer                           ;
+
+
+	if (argc != 4) {
+        printf ("USAGE : %s <itemid> <szfile> <nver> \n", argv[0]);
+        exit (0);
+    }
+
+    sprintf(szItemID  , "%s", argv[1]);
+    sprintf(szFileName, "%s", argv[2]);
+	inputVer = atoi(argv[3]);
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+    /*-----------------------------------------------------------*/
+    /*   버전입력이 없으며 최종버전 조회                         */
+    /*-----------------------------------------------------------*/
+	if (inputVer == 0) {
+		EXEC SQL
+			SELECT  CR_LSTVER
+			  INTO  :szVer
+			  FROM  CMR0020
+			 WHERE  CR_ITEMID = :szItemID;
+
+		if (sqlca.sqlcode != 0) {
+			printf("1 SQL ERROR code[%d], Msg[%s] \n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			exit(1);
+		}
+	}
+	else {
+		szVer = inputVer;
+	}
+
+    /*-----------------------------------------------------------*/
+    /*   파일의 버전소스 관리 위치가 파일시스템이면 종료         */
+    /*-----------------------------------------------------------*/
+	if (SrcBack_Local() == TRUE) {
+		exit (0);
+	}
+
+	if (InsertFileToDB(szItemID, szFileName, szVer) == FALSE)
+		exit(1);
+
+	exit(0);
+
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

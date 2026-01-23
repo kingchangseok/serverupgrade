@@ -1,0 +1,289 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ FileRead_cmr0025.pc                          │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ORACLE DB (CMR0025)에서 READ하여 파일에      │
+ │            │ Write 하는 프로그램                          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		Structure for VARRAW                                     */
+/*---------------------------------------------------------------*/
+#define TERM(X) ( X.arr[X.len] = '\0' )
+#define SLEN(X) ( X.len = strlen((char *)X.arr) )
+
+
+#define READ_SIZE 100
+
+typedef struct
+{
+	short len;
+	char  arr[READ_SIZE];
+} vr;
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+    EXEC SQL TYPE vr IS VARRAW(READ_SIZE);
+    vr my_vr;
+EXEC SQL END DECLARE SECTION;
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	o_error(char *, char *);
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+FILE *fp;
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*    CMR0025에서 READ하여 파일에 Write 처 리   MAIN             */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char  	action_str                 [512];
+long  	amount                          ;
+long  	offset                          ;
+short 	done                            ;
+long  	total                           ;
+char 	szItemID	          [dfItemID];
+char 	szOutName           [dfFullPath];
+char 	szDirName           [dfFullPath];
+char 	szBackPath               [dfDir];
+char 	szCmd               [dfFullPath];
+char	szSysCD                [dfSysCD];
+char	szDsnCD                [dfDsnCD];
+char	szRsrcName          [dfRsrcName];
+char	szAcptNo              [dfAcptNo];
+char 	szOutNameBack       [dfFullPath];
+int 	retval                          ;
+int	 	szVersion                       ;
+int	 	nCnt                            ;
+int 	nRet                            ;
+
+
+	if (argc < 4) {
+        printf ("usage : %s <ITEMID> <OutFileName> <Version> <ACPTNO>\n", argv[0]);
+        exit (0);
+    }
+
+    sprintf(szItemID , "%s", argv[1]);
+	sprintf(szOutName, "%s", argv[2]);
+	sprintf(szOutNameBack, "%s", argv[2]);
+	szVersion =  atoi(argv[3]);
+	sprintf(szAcptNo, "%s", argv[4]);
+
+
+	nRet = Right_Char_Check(szOutName, '/');
+	if (nRet > 0) {
+		sprintf(szCmd, "mkdir -p %s", left_char(szOutName, nRet - 1));
+		system(szCmd);
+	}
+	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB1() == FALSE)
+		exit(1);
+
+    /*-----------------------------------------------------------*/
+    /*   파일의 버전소스 관리 위치가 파일시스템이면              */
+    /*-----------------------------------------------------------*/
+	if (SrcBack_Local() == TRUE) {
+		EXEC SQL
+			SELECT  CR_SYSCD
+			      , CR_DSNCD
+			      , CR_RSRCNAME
+			  INTO  :szSysCD
+			  	  , :szDsnCD
+			  	  , :szRsrcName
+			  FROM  CMR0020
+			 WHERE  CR_ITEMID = :szItemID;
+
+		if (sqlca.sqlcode != 0) {
+			exit (2);
+		}
+
+		NotUseDataTruncate(szSysCD, 0x20);
+		NotUseDataTruncate(szDsnCD, 0x20);
+
+		sprintf(szRsrcName, "%s", trunc_char(szRsrcName));
+
+		/*-------------------------------------------------------*/
+		/*	BACKUP DIRECTORY 조회                                */
+		/*-------------------------------------------------------*/
+		strcat(szOutName, ".gz");
+		SetTempDir("93", szBackPath);
+		sprintf(szBackPath, "%s/%s/%s/%s", szBackPath, szSysCD, szDsnCD, szItemID);
+		sprintf(szCmd, "cp -p %s/%s.%d.zip.gz %s", szBackPath, szRsrcName, szVersion, szOutName);
+		system (szCmd);
+	}
+	else {
+	    /*-------------------------------------------------------*/
+	    /*   파일의 존재여부 체크                                */
+	    /*-------------------------------------------------------*/
+		EXEC SQL
+			SELECT  COUNT(*)
+			  INTO  :nCnt
+			  FROM  CMR0025
+			 WHERE  CR_ITEMID = :szItemID
+			   AND  CR_VER    = :szVersion
+			   AND  CR_ACPTNO = :szAcptNo;
+
+		if (sqlca.sqlcode != 0) {
+			fprintf(stderr, "%d %s\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			exit(1);
+		}
+
+		if (nCnt == 0) {
+			fprintf(stderr, "FILE NOT FOUND %d [%s] [%d]\n", nCnt, szItemID, szVersion);
+			exit(9);
+		}
+		nRet = Right_Char_Check(szOutName, '/');
+		if (nRet > 0) {
+			sprintf(szDirName, "%s", left_char(szOutName, nRet-1));
+			Local_Dir_Make(szDirName);
+		}
+
+		strcat(szOutName,".gz");
+	    fp = fopen(szOutName,"wb");
+
+	    /*-------------------------------------------------------*/
+	    /*		BLOB READ 하여 FILE 에 WRITE                     */
+	    /*-------------------------------------------------------*/
+	    strcpy( action_str, "Fetching BLOB Locator...");
+		EXEC SQL WHENEVER SQLERROR DO o_error(action_str, szOutName);
+	    EXEC SQL EXECUTE
+		    BEGIN
+				SELECT  CR_FILE
+				  INTO  blob_it.my_blob
+				  FROM  CMR0025
+				 WHERE  CR_ITEMID = :szItemID
+				   AND  CR_VER    = :szVersion
+			       AND  CR_ACPTNO = :szAcptNo;
+
+		       #ifndef V8
+		       :total := blob_it.get_blob_len;
+		       #else
+		       :total := DBMS_LOB.GETLENGTH(blob_it.my_blob);
+		       #endif
+		    END;
+		END-EXEC;
+
+	    amount = READ_SIZE;
+	    offset = 1;
+	    done   = 0;
+	    strcpy( action_str, "Reading From BLOB ...");
+
+	    while (!done) {
+		    EXEC SQL EXECUTE
+		        BEGIN
+		            #ifndef V8
+		            blob_it.read_blob(:amount,:offset,:my_vr);
+		            #else
+		            DBMS_LOB.READ(blob_it.my_blob,:amount,:offset,:my_vr);
+		            #endif
+		        END;
+			END-EXEC;
+
+			if (sqlca.sqlcode != 0) {
+				printf("DBMS_LOB_READ ERROR................[%d]\n",sqlca.sqlcode);
+				break;
+			}
+
+	        offset += amount;
+
+	        if (offset > total)
+	            done = 1;
+
+	        fwrite(my_vr.arr,(size_t)amount,(size_t)1,fp);
+	    }
+	    fclose(fp);
+	}
+
+	if (FileSizeInf(szOutName) <= 0) {
+		retval = 1;
+	}
+	else {
+		memset(szCmd,0x00,sizeof(szCmd));
+		sprintf(szCmd,"chmod 777 '%s'\n", szOutName);
+		retval = system(szCmd)/256;
+
+		sprintf(szCmd,"ecams_zip -d '%s'\n", szOutName);
+		retval = system(szCmd)/256;
+
+		sprintf(szCmd,"chmod 777 '%s'\n", szOutNameBack);
+		retval = system(szCmd)/256;
+		retval = 0;
+		remove(szOutName);
+		
+		
+		if (access(szOutNameBack, F_OK) != 0) {
+			retval = 1;
+		}
+	}
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    EXEC SQL ROLLBACK WORK RELEASE;
+    exit (retval);
+}
+
+
+/*---------------------------------------------------------------*/
+/*		ORACLE  ERROR  처리  FUNCTION                            */
+/*---------------------------------------------------------------*/
+int 	o_error	( action_str , szOutName )
+char *action_str;
+char *szOutName;
+{
+int 	i                               ;
+char 	error_str                  [512];
+
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    for ( i = 0; i < sqlca.sqlerrm.sqlerrml; i++ ) {
+        error_str[i] = sqlca.sqlerrm.sqlerrmc[i];
+    }
+
+    error_str[i] = '\0';
+    printf("\nFailed with following Oracle error while %s:\n%s\n",action_str, error_str );
+
+    EXEC SQL ROLLBACK WORK RELEASE;
+
+	char szCmd[1024];
+	sprintf(szCmd, "rm -rf %s ", szOutName);
+	system(szCmd);
+
+    exit(1);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

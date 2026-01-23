@@ -1,0 +1,602 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_acct_smssend.pc                        │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 오류시 SMS 전문을 전송한다.                  │
+ │            │ - 담당자, 책임자에게 전송                    │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2008. 03. 16                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+#include	<ecams_sms.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+#define DEBUG 1
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+int 	Process_SMSLog		();
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+extern 	char	SMS_RecvBuf             ;
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Process_SMSSend                                  */
+/*	Action    : SMS 전송                                         */
+/*	Parameter : pAcptNo : 신청번호                               */
+/*              pJobID  : 결재단계                               */
+/*	Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int 	Process_SMSSend	( char *pAcptNo
+						, char *pJobID
+					  	)
+{
+SMSIN 	*SMSIN_PTR                      ;
+SMSOUT	*SMSOUT_PTR                     ;
+char	col_SMSSEND	               [1+1];
+char	col_EDITOR	              [10+1];
+char	col_DutyUsr	              [10+1];
+char	col_ADMINUSR              [10+1];
+char	col_SENDUSR               [10+1];
+char	col_MOBILE                [20+1];
+char	col_SMSIP                 [20+1];
+char	col_SMSTEL                [20+1];
+char	col_ADMINNM               [20+1];
+int		col_SMSPORT                     ;
+char	szRstCode                 [10+1];
+char	szRstMsg                  [80+1];
+char	szMsgText                  [256];
+char	szSysMsg                  [30+1];
+char	szJobNM                   [50+1];
+char	szUserNM                  [20+1];
+char	col_SMSMSG                [40+1];
+char	col_SMSFLAG                [1+1];
+char 	col_SYSDATE               [14+1];
+char	col_SMSKey                [10+1];
+char   	workbuf         [dfeCAMSBufSize];
+int		nCnt = 0                        ;
+
+CMD_INFO	  CmdInfo                   ;
+
+
+	/*-----------------------------------------------------------*/
+	/*	SMS서버정보 조회 (IP ADDRESS, PORT, 전화번호)            */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  A.CM_SMSIP
+		      , A.CM_SMSPORT
+		      , A.CM_SMSTEL
+		      , A.CM_SMSMSG
+		      , A.CM_ADMINUSR
+		      , NVL(A.CM_SMSFLAG, 'N')
+		      , B.CM_USERNAME
+		  INTO  :col_SMSIP
+		  	  , :col_SMSPORT
+		  	  , :col_SMSTEL
+		  	  , :col_SMSMSG
+		  	  , :col_ADMINUSR
+		  	  , :col_SMSFLAG
+		  	  , :col_ADMINNM
+		  FROM  CMM0011 A, CMM0040 B
+		 WHERE  A.CM_ADMINUSR=B.CM_USERID;
+
+	if (sqlca.sqlcode != 0) {
+		printf("RETRY MSG READ ERROR 1 [%d]\n", sqlca.sqlcode);
+		return(1);
+	}
+
+	if (strcmp(pJobID, "RETRY") == 0) {
+		EXEC SQL
+			SELECT  CR_RETRYMSG
+			  INTO  :col_SMSMSG
+			  FROM  CMR1000
+			 WHERE  CR_ACPTNO = :pAcptNo;
+		if (sqlca.sqlcode != 0) {
+			printf("RETRY MSG READ ERROR [%d]\n", sqlca.sqlcode);
+			return (1);
+		}
+	}
+	
+	NotUseDataTruncate (col_SMSIP   , 0x20);
+	NotUseDataTruncate (col_SMSTEL  , 0x20);
+	NotUseDataTruncate (col_ADMINUSR, 0x20);
+	NotUseDataTruncate (col_SMSFLAG , 0x20);
+	sprintf(col_SMSMSG, "%s", (char *)trunc_char(col_SMSMSG));
+	NotUseDataTruncate (col_ADMINNM , 0x20);
+
+	
+	if (strcmp(pJobID, "RETRY") != 0) {
+		if (memcmp(col_SMSFLAG, "Y", 1) != 0)	return (0);
+	}
+	memset(&SMS_RecvBuf, 0x00, sizeof(&SMS_RecvBuf));
+
+	/*-----------------------------------------------------------*/
+	/*	SMS 전송여부 체크                                        */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CR_SMSSEND
+		      , CR_EDITOR
+		      , TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS')
+		      , SUBSTR(TO_CHAR(systimestamp, 'HH24MISSFF'),1,10)
+		  INTO  :col_SMSSEND
+		  	  , :col_EDITOR
+		  	  , :col_SYSDATE
+		  	  , :col_SMSKey
+		  FROM  CMR1000
+		 WHERE  CR_ACPTNO = :pAcptNo;
+
+	if (sqlca.sqlcode != 0) {
+		return (1);
+	}
+
+	NotUseDataTruncate(col_SMSSEND, 0x20);
+	NotUseDataTruncate(col_EDITOR , 0x20);
+
+	/*-----------------------------------------------------------*/
+	/*	책임자 ID 조회                                           */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CR_TEAM
+		  INTO  :col_DutyUsr
+		  FROM  CMR9900 A
+		 WHERE  CR_ACPTNO = :pAcptNo
+		   AND  CR_LOCAT  = (SELECT  MIN(CR_LOCAT)
+		                       FROM  CMR9900
+		                      WHERE  CR_ACPTNO = A.CR_ACPTNO
+		                        AND  CR_LOCAT != '00'
+		                        AND  CR_TEAMCD = '3'
+		                        AND  INSTR(CR_CONFNAME, '책임자') > 0
+		                    );
+
+	if (sqlca.sqlcode != 0) {
+		memset(col_DutyUsr, 0x00, sizeof(col_DutyUsr));
+	}
+
+	NotUseDataTruncate (col_DutyUsr, 0x20);
+	
+	
+	/*-----------------------------------------------------------*/
+	/*	SMS 전송하였으면 RETURN                                  */
+	/*-----------------------------------------------------------*/
+	if (strcmp(pJobID, "RETRY") != 0) {
+		if (memcmp(col_SMSSEND, "1", 1) == 0) {
+			return(1);
+		}
+	}
+
+	/*-----------------------------------------------------------*/
+	/*	신청자정보 조회 (신청자, 시스템명, 업무명)               */
+	/*-----------------------------------------------------------*/
+	memset(szSysMsg, 0x00, sizeof(szSysMsg));
+	memset(szJobNM , 0x00, sizeof(szJobNM ));
+	memset(szUserNM, 0x00, sizeof(szUserNM));
+
+	EXEC SQL
+		SELECT  b.CM_SYSMSG
+		      , c.CM_JOBNAME
+		      , d.CM_USERNAME
+		  INTO  :szSysMsg
+			  , :szJobNM
+			  , :szUserNM
+		  FROM  CMR1000 a
+		      , CMM0030 b
+		      , CMM0102 c
+		      , CMM0040 d
+		 WHERE  a.CR_AcptNo = :pAcptNo
+		   AND  a.CR_SYSCD  = b.CM_SYSCD
+		   AND  a.CR_JOBCD  = c.CM_JOBCD
+		   AND  a.CR_EDITOR = d.CM_USERID;
+
+	sprintf(szSysMsg, "%s", (char *)trunc_char(szSysMsg));
+	sprintf(szJobNM , "%s", (char *)trunc_char(szJobNM ));
+	sprintf(szUserNM, "%s", (char *)trunc_char(szUserNM));
+
+	/*-----------------------------------------------------------*/
+	/*	신청자정보 조회 (IP ADDRESS, 전화번호)                   */
+	/*-----------------------------------------------------------*/
+	if (strcmp(pJobID, "SYSCB") == 0 ||
+		strcmp(pJobID, "SYSGB") == 0 ||
+		strcmp(pJobID, "SYSTS") == 0 ||
+		strcmp(pJobID, "SYSUP") == 0 ||
+		strcmp(pJobID, "SYSED") == 0 ) {
+		sprintf(col_SENDUSR, "%s", col_EDITOR);
+	}
+	else {
+		sprintf(col_SENDUSR, "%s", col_ADMINUSR);
+		memset(col_DutyUsr, 0x00, sizeof(col_DutyUsr));
+	}
+
+	EXEC SQL
+		SELECT  CM_MOBILE
+		  INTO  :col_MOBILE
+		  FROM  CMM0040
+		 WHERE  CM_USERID = :col_SENDUSR;
+
+	if (sqlca.sqlcode != 0) {
+		memset(col_MOBILE   , 0x00, sizeof(col_MOBILE   ));
+	}
+	NotUseDataTruncate (col_MOBILE   , 0x20);
+
+
+	EXEC SQL
+		INSERT INTO TB_ECAMS_CM_AH_SMSSND
+			(  ECARE_NO
+              ,CHANNEL    
+              ,SYSTEM_ID  
+              ,SVC_ID     
+              ,SEQ        
+              ,RECEIVER_ID
+              ,REQ_DEPT_ID
+              ,REQ_USER_ID
+              ,SEND_FG    
+              ,REQ_DT
+              ,REQ_TM
+              ,TMPL_TYPE    
+              ,RECEIVER_NM  
+              ,RECEIVER     
+              ,SENDER_NM    
+              ,SENDER       
+              ,JONMUN      
+			)
+		VALUES
+			( '602' ,
+              'S',
+              'ec' ,
+              'ec' ,
+              'ec' || lpad(SMSID_SEQ.nextval,12,'0'),
+              :col_EDITOR,
+              '생명공통팀',
+              :col_ADMINUSR,
+              'R' ,
+              to_char(sysdate,'yyyymmdd') ,
+              to_char(sysdate,'hh24miss') ,
+              'J' ,
+              :szUserNM ,
+              :col_MOBILE,
+              :col_ADMINNM,
+              :col_SMSTEL,
+              :col_SMSMSG 
+	);
+			
+	Process_SMSLog	(pAcptNo, pJobID, col_SENDUSR, col_MOBILE, szMsgText, szRstCode, col_SMSMSG);
+	
+	printf("SMS RECV AFT  [%s] [%s]\n", szRstCode, szRstMsg);
+
+
+	/*-----------------------------------------------------------*/
+	/*	책임자앞 SMS 전송                                        */
+	/*-----------------------------------------------------------*/
+
+/*
+	if (strlen(col_DutyUsr) > 0) {
+		memset(col_MOBILE, 0x00, sizeof(col_MOBILE));
+		memset(szUserNM,   0x00, sizeof(szUserNM));
+		
+		EXEC SQL
+			SELECT  CM_MOBILE,
+			        CM_USERNAME
+			  INTO  :col_MOBILE
+			  	  , :szUserNM
+			  FROM  CMM0040
+			 WHERE  CM_USERID = :col_DutyUsr;
+
+		if (sqlca.sqlcode != 0) {
+			memset(col_MOBILE, 0x00, sizeof(col_MOBILE   ));
+		}
+
+		NotUseDataTruncate (col_MOBILE, 0x20);
+		EXEC SQL
+			INSERT INTO TB_ECAMS_CM_AH_SMSSND
+				(  ECARE_NO
+	              ,CHANNEL    
+	              ,SYSTEM_ID  
+	              ,SVC_ID     
+	              ,SEQ        
+	              ,RECEIVER_ID
+	              ,REQ_DEPT_ID
+	              ,REQ_USER_ID
+	              ,SEND_FG    
+	              ,REQ_DT
+	              ,REQ_TM
+	              ,TMPL_TYPE    
+	              ,RECEIVER_NM  
+	              ,RECEIVER     
+	              ,SENDER_NM    
+	              ,SENDER       
+	              ,JONMUN      
+				)
+			VALUES
+				( '602' ,
+	              'S',
+	              'ec' ,
+	              'ec' ,
+	              'ec' || lpad(SMSID_SEQ.nextval,12,'0'),
+	              :col_EDITOR,
+	              '생명공통팀',
+	              :col_ADMINUSR,
+	              'R' ,
+	              to_char(sysdate,'yyyymmdd') ,
+	              to_char(sysdate,'hh24miss') ,
+	              'J' ,
+	              :szUserNM ,
+	              :col_MOBILE,
+	              :col_ADMINNM,
+	              :col_SMSTEL,
+	              :col_SMSMSG 
+		);
+
+		Process_SMSLog	(pAcptNo, pJobID, col_DutyUsr, col_MOBILE, szMsgText, szRstCode, col_SMSMSG);
+
+	}
+*/
+
+	OIC_SMSServerSet (OFF);
+
+	/*-----------------------------------------------------------*/
+	/*	SMS 전송 완료 SET                                        */
+	/*-----------------------------------------------------------*/
+	if (strcmp(pJobID, "RETRY") != 0) {
+		EXEC SQL
+			UPDATE  CMR1000
+			   SET  CR_SMSSEND = '1'
+			 WHERE  CR_ACPTNO  = :pAcptNo;
+
+		EXEC SQL COMMIT;
+	}
+	return (0);
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Process_SMSSend_SvrErr                           */
+/*	Action    : AGENT 장애 SMS 전송                              */
+/*	Parameter :                                                  */
+/*	Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int 	Process_SMSSend_SvrErr	(
+					  			)
+{
+SMSIN  *SMSIN_PTR                       ;
+SMSOUT *SMSOUT_PTR                      ;   
+char	col_SMSSEND	               [1+1];
+char	col_ADMINUSR              [10+1];
+char	col_ADMINNM               [20+1];
+char	col_SENDUSR               [10+1];
+char	col_MOBILE                [20+1];
+char	col_SMSIP                 [20+1];
+char	col_SMSTEL                [20+1];
+int		col_SMSPORT                     ;
+char	szRstCode                 [10+1];
+char	szRstMsg                  [80+1];
+char	szMsgText                  [256];
+char	szSysMsg                  [30+1];
+char	szJobNM                   [50+1];
+char	szUserNM                  [20+1];
+char	col_SMSMSG                [40+1];
+char	col_SMSFLAG                [1+1];
+char 	col_SYSDATE               [14+1];
+char	col_SMSKey                [10+1];
+char   	workbuf         [dfeCAMSBufSize];
+int		nCnt = 0                        ;
+
+CMD_INFO	  CmdInfo                   ;
+
+
+	/*-----------------------------------------------------------*/
+	/*	SMS서버정보 조회 (IP ADDRESS, PORT, 전화번호)            */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  A.CM_SMSIP
+		      , A.CM_SMSPORT
+		      , A.CM_SMSTEL
+		      , A.CM_SMSMSG
+		      , A.CM_ADMINUSR
+		      , NVL(A.CM_SMSFLAG1, 'N')
+		      , TO_CHAR(SYSDATE, 'YYYYMMDDHH24MISS')
+		      , SUBSTR(TO_CHAR(systimestamp, 'HH24MISSFF'),1,10)
+		      , B.CM_USERNAME
+		  INTO  :col_SMSIP
+		  	  , :col_SMSPORT
+		  	  , :col_SMSTEL
+		  	  , :col_SMSMSG
+		  	  , :col_ADMINUSR
+		  	  , :col_SMSFLAG
+		  	  , :col_SYSDATE
+		  	  , :col_SMSKey
+		  	  , :col_ADMINNM
+		  FROM  CMM0011 A, CMM0040 B 
+		 WHERE  A.CM_ADMINUSR = B.CM_USERID;
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr, "SMS 서버정보 오류 : [%d] [%s]\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return(1);
+	}
+
+	NotUseDataTruncate (col_SMSIP   , 0x20);
+	NotUseDataTruncate (col_SMSTEL  , 0x20);
+	NotUseDataTruncate (col_ADMINUSR, 0x20);
+	NotUseDataTruncate (col_SMSFLAG , 0x20);
+	sprintf(col_SMSMSG, "%s", (char *)trunc_char(col_SMSMSG));
+	NotUseDataTruncate (col_ADMINNM , 0x20);
+
+	if (memcmp(col_SMSFLAG, "Y", 1) != 0) {
+		fprintf(stdout, "SMS 전송 SKIP : [%s]\n", col_SMSFLAG);
+		return (0);
+	}
+	
+	memset(&SMS_RecvBuf, 0x00, sizeof(&SMS_RecvBuf));
+
+	/*-----------------------------------------------------------*/
+	/*	신청자정보 조회 (IP ADDRESS, 전화번호)                   */
+	/*-----------------------------------------------------------*/
+	memset(col_MOBILE, 0x00, sizeof(col_MOBILE));
+	EXEC SQL
+		SELECT  CM_MOBILE
+		  INTO  :col_MOBILE
+		  FROM  CMM0040
+		 WHERE  CM_USERID = :col_ADMINUSR;
+
+	if (sqlca.sqlcode != 0) {
+		memset(col_MOBILE   , 0x00, sizeof(col_MOBILE   ));
+	}
+	NotUseDataTruncate (col_MOBILE   , 0x20);
+
+	InitCmdInfo(&CmdInfo);
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);
+
+    SMSIN_PTR  = (SMSIN  *) workbuf;
+    SMSOUT_PTR = (SMSOUT *) &SMS_RecvBuf;
+
+	sprintf(szMsgText , "%s", "서버 AGENT 장애발생 확인조치요망");
+    
+	EXEC SQL
+		INSERT INTO TB_ECAMS_CM_AH_SMSSND
+			(  ECARE_NO
+              ,CHANNEL    
+              ,SYSTEM_ID  
+              ,SVC_ID     
+              ,SEQ        
+              ,RECEIVER_ID
+              ,REQ_DEPT_ID
+              ,REQ_USER_ID
+              ,SEND_FG    
+              ,REQ_DT
+              ,REQ_TM
+              ,TMPL_TYPE    
+              ,RECEIVER_NM  
+              ,RECEIVER     
+              ,SENDER_NM    
+              ,SENDER       
+              ,JONMUN      
+			)
+		VALUES
+			( '602' ,
+              'S',
+              'ecams' ,
+              'ecams' ,
+              'ec' || lpad(SMSID_SEQ.nextval,12,'0'),
+              :col_ADMINUSR,
+              '생명공통팀',
+              :col_ADMINUSR,
+              'R' ,
+              to_char(sysdate,'yyyymmdd') ,
+              to_char(sysdate,'hh24miss') ,
+              'J' ,
+              :col_ADMINNM ,
+              :col_SMSTEL,
+              :col_ADMINNM,
+              :col_SMSTEL ,
+              '서버 AGENT 장애발생 확인조치요망!' 
+			);
+
+
+	OIC_SMSServerSet (ON);
+
+	OIC_SMSServerSet (OFF);
+
+	return (0);
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Process_SMSLog                                   */
+/*	Action    : SMS 전송 로그작성                                */
+/*	Parameter : pAcptNo   : 신청번호                             */
+/*	            pJobID    : 결재단계                             */
+/*	            pSendUser : 전송사번                             */
+/*	            pSendTel  : 전송전화번호                         */
+/*	            pSendMsg  : 전송메세지                           */
+/*	            pSendRst  : 전송결과                             */
+/*	            pRstMsg   : 전송결과메세지                       */
+/*	Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int 	Process_SMSLog	( char *pAcptNo
+						, char *pJobID
+						, char *pSendUser
+						, char *pSendTel
+						, char *pSendMsg
+						, char *pSendRst
+						, char *pRstMsg
+					  	)
+{
+int		szSeqNo                         ;
+
+	/*-----------------------------------------------------------*/
+	/*	SMS LOG 신청번호별 일련번호 채번                         */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  NVL(MAX(CR_SEQNO), 0) + 1
+		  INTO  :szSeqNo
+		  FROM  CMR8000
+		 WHERE  CR_ACPTNO = :pAcptNo;
+		 	
+	if (sqlca.sqlcode != 0)
+		szSeqNo = 1;
+
+	/*-----------------------------------------------------------*/
+	/*	SMS LOG 작성                                             */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		INSERT INTO CMR8000
+			( CR_ACPTNO
+			, CR_SEQNO
+			, CR_CONFUSR
+			, CR_SENDDATE
+			, CR_SENDUSER
+			, CR_SENDTEL
+			, CR_SENDMSG
+			, CR_SENDRST
+			, CR_RSTMSG
+			)
+		VALUES
+			( :pAcptNo
+			, :szSeqNo
+			, :pJobID
+			, SYSDATE
+			, :pSendUser
+			, :pSendTel
+			, :pSendMsg
+			, '0000'
+			, :pRstMsg
+			);
+	
+	if (sqlca.sqlcode != 0) {
+	    /*LOG*/sprintf(gszLogMsg,"[%s] SMS 전송로그작성 실패 : [%s] [%s] [%s] [%d] [%s]"
+	    						, pAcptNo, pJobID, pSendUser, pSendTel, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	    return (1);
+	}
+
+    /*LOG*/sprintf(gszLogMsg,"[%s] SMS 전송로그작성 성공 : [%s] [%s] [%s]", pAcptNo, pJobID, pSendUser, pSendTel);
+    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	EXEC SQL COMMIT;
+
+	return (0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

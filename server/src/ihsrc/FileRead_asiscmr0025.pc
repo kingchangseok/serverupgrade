@@ -1,0 +1,349 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ FileRead_asiscmr0025.pc                      │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ CMR0025에서 READ 하여 파일로 작성            │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2007. 10. 25                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+FILE *fp;
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+
+
+#define TERM(X) ( X.arr[X.len] = '\0' )
+#define SLEN(X) ( X.len = strlen((char *)X.arr) )
+
+#define READ_SIZE  4096
+
+/*---------------------------------------------------------------*/
+/*		Structure for VARRAW                                     */
+/*---------------------------------------------------------------*/
+typedef struct
+{
+	short len;
+	char  arr[READ_SIZE];
+} vr;
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+    EXEC SQL TYPE vr IS VARRAW(READ_SIZE);
+    static vr my_vr;
+EXEC SQL END DECLARE SECTION;
+
+FILE *fp;
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+static int		ERROR_FLAG = 0;
+static int 		o_error			();
+extern int     	FileSizeInf     ();
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : CONVDB_CONNECTING                                */
+/*	Action    : DB_CONNECTING                                    */
+/*	Parameter : NONE                                             */
+/*	Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int 	CONVDB_CONNECTING	(
+							)
+{
+char	szASISConnStr              [256];
+char	szTOBEConnStr              [256];
+
+
+    memset(szASISConnStr , 0x00, sizeof(szASISConnStr));
+    memset(szTOBEConnStr , 0x00, sizeof(szTOBEConnStr));
+
+	/*-----------------------------------------------------------*/
+    /*	 ASIS  DB Server  Connect                                */
+    /*-----------------------------------------------------------*/
+	EXEC SQL DECLARE ASIS DATABASE;
+	sprintf(szASISConnStr, "%s/%s@%s", (char *)getenv("DBUSER"),(char *)getenv("DBPASS"),(char *)getenv("DBCONN"));
+	
+	while (1) {
+		EXEC SQL AT ASIS CONNECT :szASISConnStr;
+		if (sqlca.sqlcode != 0) {
+			/*
+		    fprintf(stderr, "ASIS ConnectDB Failed exit !!! \n");
+		    return (1);
+		    */
+		    sleep(1);
+		}
+		break;		
+	}	
+
+	return (0);
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : cmr0025_asisread                                 */
+/*	Action    : CMR0025에서 READ 하여 파일로 작성                */
+/*	Parameter : pSysCD    : 시스템코드                           */
+/*	            pDsnCD    : 자원위치코드                         */
+/*	            pRsrcName : 자원명                               */
+/*	            pOutName  : 작성파일명                           */
+/*	            pVersion  : 작성버전                             */
+/*	Return    : 없슴                                             */
+/*---------------------------------------------------------------*/
+int		cmr0025_asisread	( char *pSysCD
+							, char *pDsnCD
+							, char *pRsrcName
+							, char *pOutName
+							, char *pVersion
+							)
+{
+char  	action_str                 [256];
+long  	amount                          ;
+long  	offset                          ;
+short 	done                            ;
+long  	total                           ;
+char 	szSysCD                    [3+1];
+char 	szDsnCD                    [5+1];
+char 	szRsrcName                [1024];
+char 	szOutName                 [1024];
+char 	szVersion                  [5+1];
+char 	szCmd                     [1024];
+int  	nCnt                            ;
+int 	nRet                            ;
+
+
+    sprintf(szSysCD     , "%s", pSysCD   );
+    sprintf(szDsnCD     , "%s", pDsnCD   );
+    sprintf(szRsrcName  , "%s", pRsrcName);
+	sprintf(szOutName   , "%s", pOutName );
+	sprintf(szVersion	, "%s", pVersion );
+
+	ERROR_FLAG = 0;
+	
+	
+	nRet = Right_Char_Check(pOutName, '/');
+	if (nRet > 0) {
+		sprintf(szCmd, "mkdir -p %s", left_char(pOutName, nRet - 1));
+		system(szCmd);
+	}
+	
+
+    /*-----------------------------------------------------------*/
+    /*	등록여부 조회                                            */
+    /*-----------------------------------------------------------*/
+	EXEC SQL 
+		SELECT  COUNT(*)
+		  INTO  nCnt
+		  FROM  COVM_SCM.CMR0025
+		 WHERE  CR_SYSCD    = :szSysCD
+		   AND  CR_DSNCD    = :szDsnCD
+		   AND  CR_VER      = :szVersion
+		   AND  CR_RSRCNAME = :szRsrcName;
+
+	if (sqlca.sqlcode != 0)  {
+		fprintf(stderr, "%d %s\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return (8);
+	}
+
+	if (nCnt == 0) {
+		return (9);
+	}
+
+	strcat(szOutName,".gz");
+    fp = fopen(szOutName,"wb");
+
+    /*-----------------------------------------------------------*/
+    /*		BLOB READ 하여 FILE 에 WRITE                         */
+    /*-----------------------------------------------------------*/
+    strcpy( action_str, "Fetching BLOB Locator...");
+	EXEC SQL WHENEVER SQLERROR DO o_error(action_str, szOutName);
+
+    EXEC SQL  EXECUTE
+	    BEGIN
+			SELECT  CR_FILE
+			  INTO  blob_it.my_blob
+			  FROM  COVM_SCM.CMR0025
+			 WHERE  CR_SYSCD    = :szSysCD
+			   AND  CR_DSNCD    = :szDsnCD
+			   AND  CR_RSRCNAME = :szRsrcName
+			   AND  CR_VER      = :szVersion;
+
+	       #ifndef V8
+	       :total := blob_it.get_blob_len;
+	       #else
+	       :total := DBMS_LOB.GETLENGTH(blob_it.my_blob);
+	       #endif
+	    END;
+	END-EXEC;
+
+	if (ERROR_FLAG != 0)	return (ERROR_FLAG);
+
+	if (total == 0)	{
+		ERROR_FLAG = 2;
+		EXEC SQL WHENEVER SQLERROR CONTINUE;
+		remove (szOutName);
+    	return (ERROR_FLAG);
+	}
+
+    amount = READ_SIZE;
+    offset = 1;
+    done   = 0;
+
+    strcpy( action_str, "Reading From BLOB ...");
+
+    while (!done) {
+	    EXEC SQL  EXECUTE
+	        BEGIN
+	            #ifndef V8
+	            COVM_SCM.blob_it.read_blob(:amount,:offset,:my_vr);
+	            #else
+	            DBMS_LOB.READ(COVM.blob_it.my_blob,:amount,:offset,:my_vr);
+	            #endif
+	        END;
+		END-EXEC;
+
+		if (ERROR_FLAG != 0)	break;
+
+        offset += amount;
+
+        if (offset > total)
+            done = 1;
+
+        fwrite(my_vr.arr,(size_t)amount,(size_t)1,fp);
+    }
+
+    fclose(fp);
+    fflush(fp);
+
+	if (ERROR_FLAG == 0) {
+		sprintf(szCmd,"ecams_zip -d \"%s\"", (char *)rep_char(szOutName, "$", "\\$"));
+		system(szCmd);
+	}
+
+	if (FileSizeInf(pOutName) <= 0) {
+		ERROR_FLAG = 3;
+	}
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    return (ERROR_FLAG);
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : o_error                                          */
+/*	Action    : ORACLE  ERROR  처리  FUNCTION                    */
+/*	Parameter : action_str  : 처리 메세지                        */
+/*	            szOutName   : 파일명                             */
+/*	Return    : 1 : 정상                                         */
+/*---------------------------------------------------------------*/
+static
+int 	o_error( action_str , szOutName )
+char *action_str;
+char *szOutName;
+{
+	char szCmd[100];
+    int i;
+    char error_str[256];
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    for ( i = 0; i < sqlca.sqlerrm.sqlerrml; i++ ) {
+        error_str[i] = sqlca.sqlerrm.sqlerrmc[i];
+    }
+
+    error_str[i] = '\0';
+    printf("\nFailed with following Oracle error while %s:\n%s\n",action_str, error_str );
+
+	remove (szOutName);
+
+    ERROR_FLAG = 1;
+
+    return (1);
+}
+
+
+/*****************************************************************/
+/*                                                               */
+/*		CMR0025에서 READ 하여 파일로 작성   처 리   M A I N      */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char 	szSysCD                    [3+1];
+char 	szDsnCD                    [5+1];
+char 	szRsrcName                [1024];
+char 	szOutName                 [1024];
+char 	szVersion                    [5];
+int		retval                          ;
+char	szStatus                     [3];
+int		szLstVer                        ;
+int		szTstVer                        ;
+
+
+	if (argc != 6) {
+        printf ("Usage : %s <SysCD> <DsnCD> <RsrcName> <OutFileName> <Version>\n", argv[0]);
+        exit (0);
+    }
+
+    sprintf(szSysCD     , "%s", argv[1]);
+    sprintf(szDsnCD     , "%s", argv[2]);
+    sprintf(szRsrcName  , "%s", argv[3]);
+	sprintf(szOutName   , "%s", argv[4]);
+	sprintf(szVersion	, "%s", argv[5]);
+
+
+	#if 0
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (CONVDB_CONNECTING() != 0)
+		exit(1);
+
+	#endif
+	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		printf("connect error \n");
+		exit(1);
+	}
+
+	retval = 0;
+
+
+	retval = cmr0025_asisread (szSysCD, szDsnCD, szRsrcName, szOutName, szVersion);
+
+    EXEC SQL AT ASIS ROLLBACK WORK RELEASE;
+
+    exit (retval);
+
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

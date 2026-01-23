@@ -1,0 +1,497 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ sync_user.pc                                 │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 직원 동기화(UserInfo)                        │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2018. 09. 11                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+/*---------------------------------------------------------------*/
+/*		내부함수			                                     */
+/*---------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+char    ** gEnvp;
+char  szExePgm          [50];
+
+/*****************************************************************/
+/*                                                               */
+/*		직원 동기화(UserInfo)  처리  MAIN                              */
+/*                                                               */
+/*****************************************************************/
+int  main(int argc, char **argv, char **envp)
+{
+	char szUserID        [dfEditor];
+	char szUserName      [dfUserNM];
+	char szJikName             [61];
+	char szTelNo               [31];
+	char szHandPhone           [31];
+	char szEmail              [101];
+	char szPosCD               [11];
+	char szCloseYN              [2];
+    char szOldUser       [dfUserNM];
+    char szOldPos              [61];
+    char szOldTel1             [31];
+    char szOldTel2             [31];
+    char szOldEmail           [101];
+    char szActive               [2];
+    
+	int addCnt  = 0;
+	int delCnt  = 0;
+	int updtCnt = 0;
+	int totCnt  = 0;
+	int nCnt    = 0;
+	int rgtCnt  = 0;
+    gEnvp = envp;
+
+	memset(szExePgm   , 0x00, sizeof(szExePgm   ));
+	strcpy(szExePgm,argv[0]);
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                         */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));	
+	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		/*LOG*/sprintf(gszLogMsg,"[%s] Connect Error \n",szExePgm);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+		exit(1);
+    }
+	
+    EXEC SQL DECLARE USERLIST CURSOR FOR
+       SELECT HWNNO
+             ,JKW_NM
+             ,JKWI_NM
+             ,CO_TELNO
+             ,EMAIL
+             ,HP_TELNO
+         FROM CTMOWN.CST_EMPLOYEE
+        WHERE BRNO='66';
+    EXEC SQL open  USERLIST;
+	while(1) {
+		EXEC SQL FETCH  USERLIST
+			INTO  :szUserID
+				 ,:szUserName
+				 ,:szJikName
+				 ,:szTelNo
+				 ,:szEmail
+				 ,:szHandPhone;
+	    if (sqlca.sqlcode == 1403) 	break;
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"SYSUP_RSRC DB FETCH ERROR : [%d] [%s]", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+		NotUseDataTruncate (szUserID   , 0x20);
+		NotUseDataTruncate (szUserName , 0x20);
+		NotUseDataTruncate (szJikName  , 0x20);
+		NotUseDataTruncate (szTelNo    , 0x20);
+		NotUseDataTruncate (szEmail    , 0x20);
+		NotUseDataTruncate (szHandPhone, 0x20);
+		
+		++totCnt;
+		EXEC SQL
+		   SELECT CM_MICODE,DECODE(CM_CLOSEDT,NULL,'N','Y')
+		     INTO :szPosCD, :szCloseYN
+		     FROM CMM0020
+		    WHERE CM_MACODE='POSITION'
+		      AND CM_CODENAME=:szJikName;
+		if (sqlca.sqlcode != 0) {
+			if (sqlca.sqlcode != 1403) {
+				sprintf(gszLogMsg,"[%s][%s][%s][%s] CMM0020 Select FAIL [%s] [%d] "
+						,szExePgm,szUserID,szUserName,szJikName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+				exit(1);
+			}
+			EXEC SQL
+			   INSERT INTO CMM0020
+			      (CM_MACODE,CM_MICODE,CM_CODENAME,CM_CREATDT,CM_LASTUPDT,CM_SEQNO,CM_USEYN)
+			      (SELECT 'POSITION',LPAD(MAX(CM_MICODE)+1,9,'0'),:szJikName,SYSDATE,SYSDATE,0,'Y'
+			         FROM CMM0020
+			        WHERE CM_MACODE='POSITION');
+			EXEC SQL COMMIT;
+			
+			EXEC SQL
+				SELECT CM_MICODE
+			     INTO :szPosCD
+			     FROM CMM0020
+			    WHERE CM_MACODE='POSITION'
+			      AND CM_CODENAME=:szJikName;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg,"[%s][%s][%s][%s] CMM0020 MACODE='POSITION' GET FAIL [%s] [%d] "
+						,szExePgm,szUserID,szUserName,szJikName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+				exit(1);
+			}
+			NotUseDataTruncate (szPosCD    , 0x20);
+			strcpy(szCloseYN,"N");      	
+		} else {
+			NotUseDataTruncate (szPosCD    , 0x20);
+			NotUseDataTruncate (szCloseYN  , 0x20);
+			
+			if (strcmp(szCloseYN,"Y") == 0) {
+				EXEC SQL
+				   UPDATE CMM0020
+				      SET CM_CLOSEDT=''
+				         ,CM_USEYN='Y'
+				    WHERE CM_MACODE='POSITION'
+				      AND CM_MICODE=:szPosCD;
+				EXEC SQL COMMIT;
+			}
+		}
+		EXEC SQL
+		   SELECT A.CM_USERNAME,A.CM_POSNAME,A.CM_TELNO1,A.CM_TELNO2,A.CM_EMAIL,A.CM_ACTIVE
+		     INTO :szOldUser, :szOldPos, :szOldTel1, :szOldTel2, :szOldEmail, :szActive
+		     FROM CMM0040 A
+		    WHERE A.CM_USERID=:szUserID;
+		if (sqlca.sqlcode != 0) {
+			if (sqlca.sqlcode != 1403) {
+				sprintf(gszLogMsg,"[%s][%s][%s] CMM0040 Select FAIL [%s] [%d] "
+						,szExePgm,szUserID,szUserName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+				exit(1);
+			}
+			EXEC SQL
+			   INSERT INTO CMM0040
+			      (CM_USERID,CM_USERNAME,CM_ERCOUNT,CM_CHANGEDT,CM_LOGINDT,CM_ADMIN,
+			       CM_MANID,CM_STATUS,CM_PROJECT,CM_POSITION,CM_POSNAME,CM_DUTY,
+			       CM_ACTIVE,CM_TELNO1,CM_TELNO2,CM_DUMYPW,CM_JUMINNUM,CM_HANDRUN,
+			       CM_EMAIL,CM_CREATDT)
+			    VALUES
+			      (:szUserID,:szUserName,0,SYSDATE,SYSDATE,'0',
+			       DECODE(SUBSTR(:szJikName,1,1),'S','N','Y'),'0','ORG0015',:szPosCD,:szJikName,:szPosCD,
+			       '1',:szTelNo,:szHandPhone,'1234','1234','N',
+			       	:szEmail,SYSDATE);
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg,"[%s][%s][%s] CMM0040 Insert FAIL [%s] [%d] "
+						,szExePgm,szUserID,szUserName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				EXEC SQL ROLLBACK RELEASE;	
+				continue;
+			}
+			
+			/*****************************************************
+			              Default 기본사용자(90) 권한 추가
+			*****************************************************/
+			EXEC SQL
+			   INSERT INTO CMM0043
+			      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+			    VALUES
+			      (:szUserID,'90',SYSDATE,SYSDATE);
+			
+			/*****************************************************
+			           JKWI_NM_ORG '부부장'이면 책임자(91) 결재
+			*****************************************************/
+			if (strcmp(szJikName,"부부장") == 0) {
+				EXEC SQL
+				   INSERT INTO CMM0043
+				      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+				    VALUES
+				      (:szUserID,'91',SYSDATE,SYSDATE);
+			}
+			
+			/*****************************************************
+			     JKWI_NM_ORG '부부장', '팀장(부서장대우)'이면 파트장(59) 결재
+			*****************************************************/
+			if (strcmp(szJikName,"부부장") == 0 || strcmp(szJikName,"팀장(부서장대우)") == 0) {
+				EXEC SQL
+				   INSERT INTO CMM0043
+				      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+				    VALUES
+				      (:szUserID,'59',SYSDATE,SYSDATE);
+			}
+			
+			/*****************************************************
+			     JKWI_NM_ORG 'S'로 시작하면 운영자:형상관리담당자(56)
+			*****************************************************/
+			if (cmp_mid_char(szJikName,1,1,"S")== 0) {
+				EXEC SQL
+				   INSERT INTO CMM0043
+				      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+				    VALUES
+				      (:szUserID,'56',SYSDATE,SYSDATE);
+			}
+			
+			EXEC SQL
+			   INSERT INTO CMM0043_HISTORY
+			      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_CREATOR,CM_UPDATEDT)
+			      (SELECT CM_USERID,CM_RGTCD,CM_CREATDT,'MASTER',CM_CREATDT
+			         FROM CMM0043
+			        WHERE CM_USERID=:szUserID);
+			EXEC SQL COMMIT; 
+			++addCnt; 
+			continue;    				
+		}
+		NotUseDataTruncate (szOldUser   , 0x20);
+		NotUseDataTruncate (szOldPos    , 0x20);
+		NotUseDataTruncate (szOldTel1   , 0x20);
+		NotUseDataTruncate (szOldTel2   , 0x20);
+		NotUseDataTruncate (szOldEmail  , 0x20);
+		NotUseDataTruncate (szActive    , 0x20);
+		
+		if (strcmp(szUserName ,szOldUser) != 0 || /*사용자명 불일치*/
+		    strcmp(szJikName  ,szOldPos)  != 0 || /*직위 불일치  */
+		    strcmp(szTelNo    ,szOldTel1) != 0 || /*회사전화번호  */
+		    strcmp(szHandPhone,szOldTel2) != 0 || /*핸드폰     */
+		    strcmp(szEmail    ,szOldEmail)!= 0 || /*이메일     */
+		    strcmp(szActive,"0") == 0) {          /*폐기사용자   */
+			EXEC SQL
+			   UPDATE CMM0040
+			      SET CM_USERNAME= :szUserName
+			      	 ,CM_POSNAME = :szJikName
+			      	 ,CM_POSITION= :szPosCD
+			      	 ,CM_TELNO1  = :szTelNo
+			      	 ,CM_TELNO2  = :szHandPhone
+			      	 ,CM_EMAIL   = :szEmail
+			      	 ,CM_DUTY    = :szPosCD
+			      	 ,CM_CHANGEDT= SYSDATE
+			      	 ,CM_ACTIVE  = '1'
+			      	 ,CM_MANID   = DECODE(SUBSTR(:szJikName,1,1),'S','N','Y')
+			    WHERE CM_USERID  =:szUserID;			
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg,"[%s][%s][%s] CMM0040 Update FAIL [%s] [%d] "
+						,szExePgm,szUserID,szUserName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				EXEC SQL ROLLBACK RELEASE;	
+				continue;
+			} 
+			EXEC SQL COMMIT;
+			
+			rgtCnt = 0;
+			
+			/*****************************************************
+			              Default 기본사용자(90) 권한 추가
+			*****************************************************/
+			EXEC SQL
+			   SELECT COUNT(*)
+			     INTO :nCnt
+			     FROM CMM0043
+			    WHERE CM_USERID=:szUserID
+			      AND CM_RGTCD='90';
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg,"[%s][%s][%s] CMM0043 Select FAIL [90] [%s] [%d] "
+						,szExePgm,szUserID,szUserName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				EXEC SQL ROLLBACK RELEASE;	
+				exit(1);
+			}
+			if (nCnt == 0) {
+				EXEC SQL
+				   INSERT INTO CMM0043
+				      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+				    VALUES
+				      (:szUserID,'90',SYSDATE,SYSDATE);
+				rgtCnt++;
+			}
+			
+			/*****************************************************
+			           JKWI_NM_ORG '부부장'이면 책임자(91) 결재
+			*****************************************************/
+			if (strcmp(szJikName,"부부장") == 0) {
+				EXEC SQL
+				   SELECT COUNT(*)
+				     INTO :nCnt
+				     FROM CMM0043
+				    WHERE CM_USERID=:szUserID
+				      AND CM_RGTCD='91';
+				if (sqlca.sqlcode != 0) {
+					sprintf(gszLogMsg,"[%s][%s][%s] CMM0043 Select FAIL [91] [%s] [%d] "
+							,szExePgm,szUserID,szUserName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					EXEC SQL ROLLBACK RELEASE;	
+					exit(1);
+				}
+				if (nCnt == 0) {
+					EXEC SQL
+					   INSERT INTO CMM0043
+					      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+					    VALUES
+					      (:szUserID,'91',SYSDATE,SYSDATE);
+					rgtCnt++;
+				}
+			}
+			
+			/*****************************************************
+			     JKWI_NM_ORG '부부장', '팀장(부서장대우)'이면 파트장(59) 결재
+			*****************************************************/
+			if (strcmp(szJikName,"부부장") == 0 || strcmp(szJikName,"팀장(부서장대우)") == 0) {
+				EXEC SQL
+				   SELECT COUNT(*)
+				     INTO :nCnt
+				     FROM CMM0043
+				    WHERE CM_USERID=:szUserID
+				      AND CM_RGTCD='59';
+				if (sqlca.sqlcode != 0) {
+					sprintf(gszLogMsg,"[%s][%s][%s] CMM0043 Select FAIL [59] [%s] [%d] "
+							,szExePgm,szUserID,szUserName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					EXEC SQL ROLLBACK RELEASE;	
+					exit(1);
+				}
+				if (nCnt == 0) {
+					EXEC SQL
+					   INSERT INTO CMM0043
+					      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+					    VALUES
+					      (:szUserID,'59',SYSDATE,SYSDATE);
+					rgtCnt++;
+				}
+			}
+			
+			/*****************************************************
+			     JKWI_NM_ORG 'S'로 시작하면 운영자:형상관리담당자(56)
+			*****************************************************/
+			if (cmp_mid_char(szJikName,1,1,"S")== 0) {
+				EXEC SQL
+				   SELECT COUNT(*)
+				     INTO :nCnt
+				     FROM CMM0043
+				    WHERE CM_USERID=:szUserID
+				      AND CM_RGTCD='56';
+				if (sqlca.sqlcode != 0) {
+					sprintf(gszLogMsg,"[%s][%s][%s] CMM0043 Select FAIL [56] [%s] [%d] "
+							,szExePgm,szUserID,szUserName,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					EXEC SQL ROLLBACK RELEASE;	
+					exit(1);
+				}
+				if (nCnt == 0) {
+					EXEC SQL
+					   INSERT INTO CMM0043
+					      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_LASTDT)
+					    VALUES
+					      (:szUserID,'56',SYSDATE,SYSDATE);
+					rgtCnt++;
+				}
+			}
+			
+			if (rgtCnt>0) {
+				EXEC SQL
+				   INSERT INTO CMM0043_HISTORY
+				      (CM_USERID,CM_RGTCD,CM_CREATDT,CM_CREATOR,CM_UPDATEDT)
+				      (SELECT CM_USERID,CM_RGTCD,CM_CREATDT,'SCMADMIN',CM_CREATDT
+				         FROM CMM0043
+				        WHERE CM_USERID=:szUserID);
+			}
+			EXEC SQL COMMIT;
+			
+			++updtCnt;    
+		}		         
+	}
+	EXEC SQL close USERLIST;	
+	
+	EXEC SQL
+		DELETE FROM CMM0020
+		 WHERE CM_MACODE='DUTY';
+		
+	EXEC SQL
+		insert into cmm0020 (CM_MACODE,CM_MICODE,CM_CODENAME,CM_CREATDT,CM_LASTUPDT,CM_SEQNO,CM_USEYN)
+		(select 'DUTY',cm_micode, cm_codename,sysdate,sysdate,0,'Y'
+		from cmm0020
+		where cm_macode = 'POSITION'
+		and cm_closedt is null);
+		
+	EXEC SQL COMMIT;
+	
+	EXEC SQL DECLARE CLOSELIST CURSOR FOR
+	   SELECT CM_USERID
+	     FROM CMM0040
+	    WHERE CM_ACTIVE='1'
+	      AND NVL(CM_HANDRUN,'Y')='N'
+	    MINUS
+	   SELECT HWNNO
+         FROM CTMOWN.CST_EMPLOYEE
+        WHERE BRNO='66';
+	EXEC SQL open  CLOSELIST;
+	while(1) {
+		EXEC SQL FETCH  CLOSELIST
+			INTO  :szUserID;
+	    if (sqlca.sqlcode == 1403) 	break;
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"[%s] CLOSELIST DB FETCH ERROR : [%d] [%s]",szExePgm, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+		NotUseDataTruncate (szUserID   , 0x20);   
+		
+		EXEC SQL
+		   UPDATE CMM0040
+		      SET CM_ACTIVE='0'
+		         ,CM_CLSDATE=SYSDATE
+		    WHERE CM_USERID=:szUserID;
+		if (sqlca.sqlcode != 0) {
+			sprintf(gszLogMsg,"[%s][%s] CMM0040 Close FAIL [%s] [%d] "
+					,szExePgm,szUserID,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			EXEC SQL ROLLBACK RELEASE;	
+			continue;
+		} 
+		EXEC SQL COMMIT;
+		
+		EXEC SQL
+		   DELETE CMM0043
+		    WHERE CM_USERID=:szUserID;
+		
+		EXEC SQL
+		   UPDATE CMM0043_HISTORY
+		      SET CM_CLOSEDT=SYSDATE
+		         ,CM_CLOSER='SCMADMIN'
+		         ,CM_UPDATEDT=SYSDATE
+		    WHERE CM_USERID=:szUserID
+		      AND CM_CLOSEDT IS NULL;
+		      
+		EXEC SQL
+		   UPDATE CMM0044
+		      SET CM_CLOSEDT=SYSDATE
+		    WHERE CM_USERID=:szUserID;
+		
+		EXEC SQL
+		   UPDATE CMM0044_HISTORY
+		      SET CM_CLOSEDT=SYSDATE
+		         ,CM_CLOSER='SCMADMIN'
+		         ,CM_UPDATEDT=SYSDATE
+		    WHERE CM_USERID=:szUserID
+		      AND CM_CLOSEDT IS NULL;
+		EXEC SQL COMMIT; 
+		++delCnt;
+	} 
+	EXEC SQL close CLOSELIST; 
+	/*LOG*/sprintf(gszLogMsg,"[%s] user sync end [Total=%d][Insert=%d][Update=%d][Close=%d] \n",
+	      szExePgm,totCnt,addCnt,updtCnt,delCnt);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+
+    EXEC SQL  COMMIT WORK RELEASE;
+
+    return (0);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

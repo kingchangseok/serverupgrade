@@ -1,0 +1,127 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_req_maint.pc                           │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 형상관리임시저장 파일 삭제                   │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 08. 13                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+#define DEBUG 1
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*			업무계 신청자원 처리 M A I N                         */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char** envp)
+{
+int		nPid                            ;
+char	szCommand           [dfFullPath];
+int		nret                            ;
+char	szReqPath                [dfDir];
+char	gszTempPath              [dfDir];
+char	szLocalFile         [dfFullPath];
+FILE	*SrcPtr                         ;
+char	dummy                     [1024];
+char	szAcptNo                   [100];
+char	szStatus                   [1+1];
+
+	memset(szCommand, 0x00, sizeof(szCommand));
+	sprintf(szCommand, "procck %s", argv[0]);
+	nret = system(szCommand) /256;
+	if (nret > 1) {
+		exit (2);
+	}
+
+	gEnvp = envp;				         /*### gEnvp = 환경변수  */
+
+	/*-----------------------------------------------------------*/
+    /*   Signal Define			                                 */
+    /*-----------------------------------------------------------*/
+    DefineSignal ();
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("77", szReqPath  );
+	SetTempDir("99", gszTempPath);
+
+	sprintf(szLocalFile, "%s.txt", argv[0]);
+
+	sprintf(szCommand,"ls %s > %s", szReqPath, szLocalFile);
+	nret = system(szCommand) /256;
+	if (nret == 0) {
+	    if ((SrcPtr = fopen(szLocalFile, "r") ) == (FILE *) NULL) {
+	        exit (1);
+	    }
+
+	    memset(dummy, 0x00, sizeof(dummy));
+	    while (fgets(dummy, 256, SrcPtr) != (char *) NULL) {
+	        sprintf(dummy, "%s", rep_char(dummy,"\n",""));
+			sprintf(dummy, "%s", rep_char(dummy,"\r",""));
+			sprintf(dummy, "%s", trunc_char(dummy));
+
+			sprintf(szAcptNo, "%s", dummy);
+
+			EXEC SQL
+				SELECT  CR_STATUS
+				  INTO  :szStatus
+				  FROM  CMR1000
+				 WHERE  CR_ACPTNO = :szAcptNo;
+
+			if (sqlca.sqlcode != 0)
+				sprintf(szStatus, "%s", "9");
+
+			NotUseDataTruncate(szStatus, 0x20);
+
+			printf(">> CHKING .. [%s] [%s]\n", szAcptNo, szStatus);
+
+			if (strcmp(szStatus, "0") != 0) {
+				sprintf(szCommand, "procck %s", szAcptNo);
+				nret = system(szCommand);
+				nret = nret / 256;
+				if (nret == 0) {
+					sprintf(szCommand, "rm -rf %s/%s", szReqPath  , szAcptNo);
+					system(szCommand);
+
+					sprintf(szCommand, "rm -rf %s/*%s*", gszTempPath, szAcptNo);
+					system(szCommand);
+				}
+			}
+	    }
+	    fclose (SrcPtr);
+	}
+
+	remove (szLocalFile);
+
+	EXEC SQL COMMIT WORK RELEASE;
+
+	exit(0);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

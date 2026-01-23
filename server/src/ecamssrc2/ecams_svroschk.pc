@@ -1,0 +1,738 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_svroschk.pc                            │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 변경관리 대상서버시스템의 OS Check           │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2008. 07. 01                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	GetSysDiskSize();
+int     GetSysUserInfo();
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+int      cSockId    ;                 /* Connect Socket ID       */
+int  	 gRcvFd     ;                 /* 수신용 File Pointer     */
+int  	 gSndFd     ;                 /* 송신용 File Pointer     */
+int  	 gProcStep  ;                 /* 송신/수신 상태          */
+int  	 gProcWork  ;                 /* 송신/수신 여부          */
+int  	 gFileOffset;                 /* 파일 송신 OffSet        */
+char     gJobGub    [2]             ; /* 처리구분                */
+char     gCommand   [dfeCAMSBufSize]; /* 처리명령문              */
+char     gLocal     [dfeCAMSBufSize]; /* Local File Name         */
+char     gLocal1    [dfeCAMSBufSize]; /* Local File Name         */
+char     gRemote    [dfeCAMSBufSize]; /* Remote File Name        */
+int      gFileSize             ;      /* File Size               */
+char     gFileDate         [20];      /* File Date               */
+char     gRstIPAddr        [20];
+char     systime  [16], sysdate [16]; /* 시스템일자, 시간        */
+char     filename         [200];      /* File Name               */
+char     SysCmd           [200];      /* 시스템 명령문           */
+char     indat            [256];      /* Process Name Work       */
+int      nret                  ;
+int      nret1                 ;
+char     sBackSorc1       [200];      /* BackUp File Name        */
+int      i                     ;      /* Loop Count Work         */
+
+
+time_t       time_clock;
+
+/*---------------------------------------------------------------*/
+/*   eCAMS  LOGGING 관련  CONSTANT                               */
+/*---------------------------------------------------------------*/
+FILE   *fd;                           /* Logging File Pointer    */
+struct stat  f_st;                    /* Logging File Struct     */
+struct tm   *loc;                     /* File 정보 Read Pointer  */
+
+char   workbuf [dfeCAMSBufSize];      /* Logging Buffer          */
+WorkStatTag  *stat_t;                 /* Logging Buffer Pointer  */
+
+
+/*---------------------------------------------------------------*/
+/*   SOCKET 통신관련  CONSTANT                                   */
+/*---------------------------------------------------------------*/
+ulong  ul_servip;                     /* Server IP의 Convert IP  */
+int    retval;                        /* 처리결과                */
+FILE   *ScrPtr;                       /* LocalFile작성용 Pointer */
+char   **gEnvp;                       /* Parameter죵료용 Pointer */
+
+extern    int    errno;               /* 시스템 오류코드         */
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       변경관리 대상서버시스템의 OS Check 처리  MAIN           */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{    
+char   ServerIP      [16];      /* SERVER IPADDRESS              */
+char   sRstCond       [5];      /* SERVER Check 결과             */
+char   szSvrOSNM    [256];      /* 서버 OS NAME                  */
+char   szSvrNM      [256];      /* 서버 OS NAME                  */
+char   szSvrOSVer   [256];      /* 서버 OS NAME                  */
+char   szSvrOSDir  [1024];      /* 서버 Agent 설치 디렉토리      */
+int    SvrPort           ;      /* 사용 PROT                     */
+int	   nTotCnt           ;      /* 대상서버 대수                 */
+int	   nOKCnt            ;      /* 정상서버 대수                 */
+int    nErrCnt           ;      /* 오류서버 대수                 */
+int	   nSize1            ;
+int	   nSize2            ;
+int	   nSize3            ;
+int	   nRet              ;
+int	   nCnt              ;
+FILE   *SRCPTR           ;
+char   sAgentDir  [100+1];
+int	   errRtCode         ;
+
+    gEnvp = envp;
+	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		printf("DB Connect error %d\n",sqlca.sqlcode);
+		exit(1);
+	}
+
+    nTotCnt = 0;
+    nOKCnt  = 0;
+    nErrCnt = 0;
+    
+    nSize1 = 0;
+    nSize2 = 0;
+    nSize3 = 0;
+
+    DefineSignal ();
+
+	EXEC SQL
+		UPDATE  CMM0031
+	       SET  CM_DBSTRING   = ''
+              , CM_DBUSR      = ''
+              , CM_DBPASS     = ''
+              , CM_GRPID      = ''
+     	 WHERE CM_CLOSEDT IS NULL;
+
+	EXEC SQL COMMIT;
+	
+    EXEC SQL declare SYSInfo cursor for
+         SELECT  A.CM_SvrIP , NVL(A.CM_PortNo  , 0), CM_DIR
+           FROM  CMM0030 B,CMM0031 a
+          WHERE  B.CM_CLOSEDT IS NULL
+            AND  B.CM_SYSCD=A.CM_SYSCD
+            AND  A.CM_Closedt IS NULL
+            AND  A.CM_SvrIP   IS NOT NULL
+            AND  A.CM_SYSOS  = '01'
+          GROUP  BY  A.CM_SVRIP,A.CM_PORTNO, CM_DIR
+          ORDER  BY  A.CM_SVRIP;
+            
+	system ("clear");
+	
+	fprintf(stdout, "\n");
+	fprintf(stdout, " \033[5m┌───────────────────────────────────────────┐\033[0m\n");
+	fprintf(stdout, " \033[5m│              형상관리 적용대상 서버 OS 정보 조회                                     │\033[0m\n");
+	fprintf(stdout, " \033[5m└───────────────────────────────────────────┘\033[0m\n");
+	fprintf(stdout, "\n");
+
+	EXEC SQL open SYSInfo;
+	while (1) {
+		EXEC SQL fetch SYSInfo into :ServerIP, :SvrPort, :sAgentDir;
+
+			
+		if (sqlca.sqlcode != 0) break;
+		
+		if (SvrPort == 0)
+			SvrPort = dfeCAMSFepPort;
+
+		nTotCnt++;
+		
+		NotUseDataTruncate (ServerIP  ,  0x20);
+		NotUseDataTruncate (sAgentDir ,  0x20);
+		
+		ul_servip = CvtIPchr2ulong (ServerIP);
+			
+		memset(sRstCond, 0x00, sizeof(sRstCond));  
+		cSockId = ConnectClient2Server (SvrPort, ul_servip);
+		if (cSockId <= 0) {
+			nErrCnt++;
+			fprintf(stdout, " [%s]\t[%6d]\tError\n", ServerIP, SvrPort);
+			sprintf(sRstCond, "ER");
+			continue;
+		}
+		else {
+			DisConnectSocket (cSockId);
+			nOKCnt++;
+			
+			ServerCmd(ServerIP, SvrPort, "S", "", "", "uname -a > SVROS.TXT", 0);
+			ServerCmd(ServerIP, SvrPort, "G", "SVROS.txt", "SVROS.TXT", "", 0);
+			ServerCmd(ServerIP, SvrPort, "S", "", "", "\\rm SVROS.TXT", 0);
+			
+			memset(szSvrOSNM , 0x00, sizeof(szSvrOSNM ));
+			memset(szSvrNM   , 0x00, sizeof(szSvrNM   ));
+			memset(szSvrOSVer, 0x00, sizeof(szSvrOSVer));
+		    if ((SRCPTR = fopen("SVROS.txt", "r")) != (FILE *) NULL) {
+			    fgets(indat, 256, SRCPTR);
+				fclose (SRCPTR);
+				
+				sprintf(indat, "%s", (char *)rep_char(indat, "\r", ""));
+				sprintf(indat, "%s", (char *)rep_char(indat, "\n", ""));
+				sprintf(indat, "%s", (char *)trunc_char(indat));
+							
+				nRet = Char_Check(indat, " ");
+				if (nRet > 0) {
+					sprintf(szSvrOSNM, "%s", (char *)left_char(indat, nRet));
+					sprintf(indat    , "%s", (char *)right_char(indat, strlen(indat) - nRet - 1));
+					sprintf(indat    , "%s", (char *)trunc_char(indat));
+				}
+
+				nRet = Char_Check(indat, " ");
+				if (nRet > 0) {
+					sprintf(szSvrNM, "%s", (char *)left_char(indat, nRet));
+					sprintf(indat  , "%s", (char *)right_char(indat, strlen(indat) - nRet - 1));
+					sprintf(indat  , "%s", (char *)trunc_char(indat));
+					
+					sprintf(szSvrOSVer, "%s", indat);
+				}
+				
+				/*-----------------------------------------------*/
+				/*	서버 OS 정보 변경                            */
+				/*-----------------------------------------------*/
+				EXEC SQL
+					SELECT  COUNT(*)
+					  INTO  :nCnt
+					  FROM  CMM0031_OS
+					 WHERE  CM_SVRIP = TRIM(:ServerIP);
+				
+				if (sqlca.sqlcode != 0)
+					nCnt = 0;
+					
+				if (nCnt == 0) {
+					EXEC SQL
+						INSERT  INTO  CMM0031_OS
+							( CM_SVRIP
+							, CM_SVRUNIT
+							, CM_SVRNAME
+							, CM_SVROS
+							)
+						VALUES
+							( :ServerIP
+							, :szSvrOSNM
+							, :szSvrNM
+							, :szSvrOSVer
+							);
+				}
+				else {
+					EXEC SQL
+						UPDATE  CMM0031_OS
+						   SET  CM_SVRUNIT =  :szSvrOSNM            
+							  , CM_SVRNAME =  :szSvrNM              
+							  , CM_SVROS   =  :szSvrOSVer           
+					     WHERE  CM_SVRIP = TRIM(:ServerIP);;
+				}
+				EXEC SQL COMMIT;
+		    }
+			remove("SVROS.txt");
+			
+			fprintf(stdout, " [%s]\t[%6d]\tOK [%s] [%s] [%s]\n", ServerIP, SvrPort, szSvrOSNM, szSvrNM, szSvrOSVer);
+
+
+			/*
+			ServerCmd(ServerIP, SvrPort, "S", "", "", "pwd > SVRPWD.TXT", 0);
+			ServerCmd(ServerIP, SvrPort, "G", "SVRPWD.txt", "SVRPWD.TXT", "", 0);
+			ServerCmd(ServerIP, SvrPort, "S", "", "", "\\rm SVRPWD.TXT", 0);
+			
+			remove("SVRPWD.txt");
+			*/
+		}
+		fflush (stdout);
+		
+		
+		/*-------------------------------------------------------*/
+		/*   시스템/서버별 Agent Disk Size 체크                  */
+		/*-------------------------------------------------------*/
+		errRtCode = GetSysDiskSize(ServerIP,sAgentDir,SvrPort);
+		
+		/*-------------------------------------------------------*/
+		/*   시스템/서버별 Agent 실행 계정 체크                  */
+		/*-------------------------------------------------------*/
+		errRtCode = GetSysUserInfo(ServerIP,sAgentDir,SvrPort);		
+
+    }
+    EXEC SQL close SYSInfo;     
+
+	fprintf(stdout, "\n");
+	fprintf(stdout, " ┌───────────────────────────────────────────┐\n");
+	fprintf(stdout, " │           CHECK 결과 --> 대상서버 : %3d대,  정상 : %3d대,  장애 : %3d대              │\n", nTotCnt, nOKCnt, nErrCnt);
+ 	fprintf(stdout, " └───────────────────────────────────────────┘\n");
+	fprintf(stdout, "\n");
+	fprintf(stdout, "\n");
+
+
+    EXEC SQL COMMIT WORK RELEASE;
+    
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : GetSysDiskSize                                   */
+/*	Action    : Agent Disk Size Check                            */
+/*	Parameter :	pSyscd      : 시스템코드                         */
+/*	            pServerIP   : 서버IP                             */
+/*	            pSvrPort    : 서버포트                           */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+int		GetSysDiskSize	( char *pServerIP
+						, char *pAgentDir
+						, int  *pSvrPort
+		)
+{
+	
+char 	szTempFile          [dfFullPath];
+char    szFileList          [dfFullPath];
+char    dummy                    [16384];
+
+
+int	 	Index_key = 0                   ;
+int 	tCnt                            ;
+int     nRet                            ;
+int     szSysOsGb = 0                   ;
+char 	*szKeys                     [20];
+char 	*toktmp                         ;
+
+char 	linebuffer                [2048];
+char 	linebuffer2               [2048];
+
+
+char    wkData0                     [20];
+char    wkData1                     [20];
+char    wkData2                     [20];
+char    wkData3                     [20];
+char    wkData4                     [20];
+char    wkData5                     [20];
+char    wkData6                     [20];
+
+char    szTotDiskVol                [20];
+char    szUseDiskVol                [20];
+char    szDiskPer                   [20];
+
+char 	szCommand           [dfFullPath];
+FILE 	*fptr                           ;
+CMD_INFO	  CmdInfo                   ;
+
+	InitCmdInfo(&CmdInfo); 
+	sprintf(szFileList, "%s.diffchk", pServerIP);
+
+	/*-----------------------------------------------------------*/
+	/*	Disk Size 명령문구 실행                                  */
+	/*-----------------------------------------------------------*/
+	strcpy(CmdInfo.szServerIP, pServerIP);
+	strcpy(CmdInfo.szJobGub,"S");
+
+	sprintf(CmdInfo.szCommand,"df -k \"%s\" > %s/%s", pAgentDir, pAgentDir, szFileList);
+
+	//printf("명령문 : [%s]\n", CmdInfo.szCommand);
+	Server_Cmd_JOB(&CmdInfo);
+
+	/*-----------------------------------------------------------*/
+	/*	Disk Size 생성 파일 GET                                  */
+	/*-----------------------------------------------------------*/
+	strcpy(CmdInfo.szJobGub,"G");
+	sprintf(CmdInfo.szLocal,"/userdir/covmadm/bin/%s", szFileList);
+	sprintf(CmdInfo.szRemote,"%s/%s",pAgentDir,szFileList);
+
+	Server_Cmd_JOB(&CmdInfo);
+	//LookCMD_INFO(&CmdInfo);
+
+	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		fprintf(stdout, "파일 점검 리스트를 가져오지 못했습니다.[%s]  IP=[%s] pAgentDir=[%s] \n",CmdInfo.szRstCond,pServerIP,pAgentDir);
+		return(1);
+	}
+	
+	/*-----------------------------------------------------------*/
+	/*	Disk Size 생성 파일 삭제                                 */
+	/*-----------------------------------------------------------*/
+	/*
+	strcpy(CmdInfo.szJobGub,"S");
+	sprintf(CmdInfo.szCommand,"rm -rf %s/%s",pAgentDir, szFileList);
+
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	*/
+	
+	/*-----------------------------------------------------------*/
+	/*	명령어 결과 파일 분석                                    */
+	/*-----------------------------------------------------------*/
+	//sprintf(szTempFile,"/userdir/covmadm/bin/%s",szFileList);
+	sprintf(szTempFile,"%s.tmp",szFileList);
+	
+	sprintf(szCommand,"cat '%s' >> '%s'",szFileList, szTempFile);
+    system(szCommand);
+			
+	fptr = fopen (szTempFile,"r");
+ 				
+	while (fgets(dummy, 16384, fptr) != (char *) NULL) {		
+		sprintf(dummy, "%s",rep_char(dummy,"\n"  , ""));
+		sprintf(dummy, "%s",rep_char(dummy,"\r\n", ""));
+		sprintf(dummy, "%s",trunc_char(dummy));
+
+	    if (strlen(dummy) < 1) continue;
+		Index_key = 0;
+		szKeys[Index_key] = strtok_r(dummy, " ", &toktmp);
+		
+		if (szKeys[Index_key] == NULL) break;
+				
+		if (Index_key == 0) {
+			if (cmp_left_char(dummy,1,"/") == 0) {
+				
+				szSysOsGb = 2;
+    			//sprintf(szOsCase,"2");		
+	        }else{ 
+				szSysOsGb = 1;	        	
+    			//sprintf(szOsCase,"1");	
+	        }
+		}
+		break;
+	}
+	fclose (fptr);
+	
+	tCnt = 0;	
+	
+	memset(szTotDiskVol  ,0x00 ,sizeof(szTotDiskVol));
+	memset(szUseDiskVol  ,0x00 ,sizeof(szUseDiskVol));
+	memset(szDiskPer     ,0x00 ,sizeof(szDiskPer));
+			
+	fptr = fopen (szFileList,"r");
+	
+	if(szSysOsGb == 1) {				
+		while (fgets(dummy, 16384, fptr) != (char *) NULL) {
+			
+			memset(wkData0       ,0x00 ,sizeof(wkData0));
+			memset(wkData1       ,0x00 ,sizeof(wkData1));
+			memset(wkData2       ,0x00 ,sizeof(wkData2));
+			memset(wkData3       ,0x00 ,sizeof(wkData3));
+			memset(wkData4       ,0x00 ,sizeof(wkData4));
+			memset(wkData5       ,0x00 ,sizeof(wkData5));
+			memset(wkData6       ,0x00 ,sizeof(wkData6));
+		
+			sprintf(dummy, "%s",rep_char(dummy,"\n"  , ""));
+			sprintf(dummy, "%s",rep_char(dummy,"\r\n", ""));
+			sprintf(dummy, "%s",trunc_char(dummy));
+	
+		    if (strlen(dummy) < 1) continue;	
+	
+			Index_key = 0;
+	
+			while(1) {
+				if (Index_key == 0) {
+					szKeys[Index_key] = strtok_r(dummy, " ", &toktmp);
+				}
+				else
+					szKeys[Index_key] = strtok_r(NULL, (char *)" ", &toktmp);
+		
+				if (szKeys[Index_key] == NULL)
+					break;
+				
+				
+				tCnt++;
+	        	//if (tCnt == 1) continue;    // 첫번째 제목 표시줄 Skip
+	
+				if (Index_key == 0)      
+					strcpy(wkData0,szKeys[Index_key]);
+				else if(Index_key == 1)  
+					strcpy(wkData1,szKeys[Index_key]);
+				else if(Index_key == 2)  
+					strcpy(wkData2,szKeys[Index_key]);
+				else if(Index_key == 3)  
+					strcpy(wkData3,szKeys[Index_key]);
+				else if(Index_key == 4)  
+					strcpy(wkData4,szKeys[Index_key]);
+				else if(Index_key == 5)  
+					strcpy(wkData5,szKeys[Index_key]);
+				else if(Index_key == 6)  
+					strcpy(wkData6,szKeys[Index_key]);			
+	
+				Index_key++;
+		
+				if (Index_key > 6) break;
+						
+			}
+			nRet = Char_Check(wkData3, "%");
+			if (nRet > 0) {				
+				strcpy(szTotDiskVol,wkData1);
+				strcpy(szUseDiskVol,wkData4); 
+				strcpy(szDiskPer,wkData5);
+			}else{				
+	
+				strcpy(szTotDiskVol,wkData1);
+				strcpy(szUseDiskVol,wkData3); 
+				strcpy(szDiskPer,wkData4);
+			}	
+		}
+	
+		fclose (fptr);
+	}else{   
+	/*   szSysOsGb == 2 
+		/userdir  (/dev/vx/dsk/hpdev04dg01/userdirfs) : 70038261 total allocated Kb
+                                                  61191059 free allocated Kb
+                                                   8847202 used allocated Kb
+                                                        13 % allocation used
+    */      
+		while (fgets(dummy, 16384, fptr) != (char *) NULL) {
+		
+			memset(wkData0       ,0x00 ,sizeof(wkData0));
+			memset(wkData1       ,0x00 ,sizeof(wkData1));
+			memset(wkData2       ,0x00 ,sizeof(wkData2));
+			memset(wkData3       ,0x00 ,sizeof(wkData3));
+			memset(wkData4       ,0x00 ,sizeof(wkData4));
+			memset(wkData5       ,0x00 ,sizeof(wkData5));
+			memset(wkData6       ,0x00 ,sizeof(wkData6));
+			
+			sprintf(dummy, "%s",rep_char(dummy,"\n",   ""));
+			sprintf(dummy, "%s",rep_char(dummy,"\r\n", ""));
+			sprintf(dummy, "%s",trunc_char(dummy));
+	
+	
+		    if (strlen(dummy) < 1) continue;	
+	
+			Index_key = 0;
+	
+			tCnt++;
+			while(1) {
+				if (Index_key == 0) {
+					szKeys[Index_key] = strtok_r(dummy, " ", &toktmp);
+				}
+				else
+					szKeys[Index_key] = strtok_r(NULL, (char *)" ", &toktmp);
+		
+				if (szKeys[Index_key] == NULL)
+					break;
+				
+				if(tCnt == 1 && Index_key==3)
+					strcpy(wkData1,szKeys[Index_key]);
+					
+				if(tCnt == 1 && Index_key==4)
+					strcpy(wkData2,szKeys[Index_key]);
+					
+				if(tCnt == 3 && Index_key==0)
+					strcpy(wkData4,szKeys[Index_key]);
+
+				if(tCnt == 4 && Index_key==0)
+					strcpy(wkData5,szKeys[Index_key]);
+					
+
+				Index_key++;
+		
+				if (Index_key > 7) break;
+				
+				/*
+				printf("tCnt==[%d] \n Index_key==[%d] \n wkData0==[%s]  wkData1==[%s]  wkData2==[%s]  wkData3==[%s]  wkData4==[%s] \n",	
+			  	tCnt,Index_key,wkData0,wkData1,wkData2,wkData3,wkData4);  
+				*/
+			}
+			
+			if(strlen(szTotDiskVol) == 0){
+				if   (strcmp(wkData1,":") == 0) strcpy(szTotDiskVol,wkData2);	
+				else  strcpy(szTotDiskVol,wkData1);						
+			}
+
+			if(strlen(szTotDiskVol) == 0)	strcpy(szTotDiskVol,wkData2);						
+			if(strlen(szUseDiskVol) == 0)	strcpy(szUseDiskVol,wkData4); 
+			if(strlen(szDiskPer) == 0)		strcpy(szDiskPer,wkData5);
+				
+		}
+	
+		fclose (fptr);
+	}		
+			    
+	/*-----------------------------------------------------------*/
+	/*	DB CM_DBSTRING = szTotDiskVol   CM_DBUSR = szUseDiskVol  */
+	/*  CM_DBPASS =szDiskPer                                     */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		UPDATE  CMM0031
+	       SET  CM_DBSTRING = :szTotDiskVol
+              , CM_DBUSR    = :szUseDiskVol
+              , CM_DBPASS   = :szDiskPer
+     	 WHERE CM_SvrIP = TRIM(:pServerIP)
+       	   AND  CM_CLOSEDT IS NULL	;
+
+	if (sqlca.sqlcode != 0) {
+		printf(" Update DB ()!  pServerIP[%s] pSvrPort[%d] \n\n", pServerIP, pSvrPort);
+	}
+	
+	EXEC SQL COMMIT;
+
+	remove(szFileList);
+	remove(szTempFile);
+	
+	return 0;
+	/*-----------------------------------------------------------*/
+	/*	GetSysDiskSize 종료                                      */
+	/*-----------------------------------------------------------*/
+}
+
+/*---------------------------------------------------------------*/
+/*	Function  : GetSysUserInfo                                   */
+/*	Action    : Agent Run User Check                             */
+/*	Parameter :	pSyscd      : 시스템코드                         */
+/*	            pServerIP   : 서버IP                             */
+/*	            pSvrPort    : 서버포트                           */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+int		GetSysUserInfo	( char *pServerIP
+						, char *pAgentDir
+						, int  *pSvrPort
+		)
+{
+	
+char 	szTempFile          [dfFullPath];
+char    szFileList          [dfFullPath];
+char    dummy                    [16384];
+char    szSvrUsr                   [100];
+char 	szCommand           [dfFullPath];
+FILE 	*fptr                           ;
+CMD_INFO	  CmdInfo                   ;
+
+char    wkData0                     [20];
+char 	*szKeys                     [20];
+char 	*toktmp                         ;
+char 	linebuffer                [2048];
+char 	linebuffer2               [2048];
+int	 	Index_key = 0                   ;
+
+
+	
+	InitCmdInfo(&CmdInfo);
+	sprintf(szFileList, "%s.svrusrchk", pServerIP);
+
+	/*-----------------------------------------------------------*/
+	/*	Disk Size 명령문구 실행                                  */
+	/*-----------------------------------------------------------*/
+	strcpy(CmdInfo.szServerIP, pServerIP);
+	strcpy(CmdInfo.szJobGub,"S");
+
+	sprintf(CmdInfo.szCommand,"ps -ef |grep ecams_svr_new |grep -v grep  |grep -v apcnadm> %s/%s", pAgentDir, szFileList);
+
+	printf("명령문 : [%s]\n", CmdInfo.szCommand);
+	Server_Cmd_JOB(&CmdInfo);
+	
+
+	/*-----------------------------------------------------------*/
+	/*	Disk Size 생성 파일 GET                                  */
+	/*-----------------------------------------------------------*/
+	strcpy(CmdInfo.szJobGub,"G");
+	sprintf(CmdInfo.szLocal,"/userdir/covmadm/bin/%s", szFileList);
+	sprintf(CmdInfo.szRemote,"%s/%s",pAgentDir,szFileList);
+
+	Server_Cmd_JOB(&CmdInfo);
+
+	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		fprintf(stdout, "파일 점검 리스트를 가져오지 못했습니다.[%s]  IP=[%s] pAgentDir=[%s] \n",CmdInfo.szRstCond,pServerIP,pAgentDir);
+		return(1);
+	}
+	
+	/*-----------------------------------------------------------*/
+	/*	Disk Size 생성 파일 삭제                                 */
+	/*-----------------------------------------------------------*/
+	/*
+	strcpy(CmdInfo.szJobGub,"S");
+	sprintf(CmdInfo.szCommand,"rm -rf %s/%s",pAgentDir, szFileList);
+
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	*/
+	
+	/*-----------------------------------------------------------*/
+	/*	명령어 결과 파일 분석                                    */
+	/*-----------------------------------------------------------*/
+	sprintf(szTempFile,"%s.tmp",szFileList);
+	
+	sprintf(szCommand,"cat '%s' >> '%s'",szFileList, szTempFile);
+    system(szCommand);
+
+	printf("szCommand=[%s]", szCommand);			
+			
+	fptr = fopen (szTempFile,"r");
+	
+	while (fgets(dummy, 16384, fptr) != (char *) NULL) {
+	
+		memset(wkData0       ,0x00 ,sizeof(wkData0));
+	
+		sprintf(dummy, "%s",rep_char(dummy,"\n"  , ""));
+		sprintf(dummy, "%s",rep_char(dummy,"\r\n", ""));
+		sprintf(dummy, "%s",trunc_char(dummy));
+	
+	    if (strlen(dummy) < 1) continue;	
+	
+		Index_key = 0;
+
+		if (Index_key == 0) {
+			szKeys[Index_key] = strtok_r(dummy, " ", &toktmp);
+		}
+		else
+			szKeys[Index_key] = strtok_r(NULL, (char *)" ", &toktmp);
+
+		if (szKeys[Index_key] == NULL)
+			break;
+		
+		
+		strcpy(wkData0,szKeys[Index_key]);
+		strcpy(szSvrUsr,wkData0);
+		fclose (fptr);
+		
+		
+		printf("wkData0=[%s] \n", wkData0);
+	}
+
+  
+	/*-----------------------------------------------------------*/
+	/*	 CM_PERMISSION == Agnet 실행 계정                        */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		UPDATE  CMM0031
+	       SET  CM_GRPID = :wkData0
+     	 WHERE CM_SvrIP = TRIM(:pServerIP)
+       	   AND  CM_CLOSEDT IS NULL	;
+
+	if (sqlca.sqlcode != 0) {
+		printf(" Update DB ()!  pServerIP[%s] pSvrPort[%d] \n\n",pServerIP,pSvrPort);
+	}
+		
+	EXEC SQL COMMIT;
+
+	remove(szFileList);
+	remove(szTempFile);
+	
+	return 0;
+	/*-----------------------------------------------------------*/
+	/*	GetSysUserInfo 종료                                      */
+	/*-----------------------------------------------------------*/
+}
+
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

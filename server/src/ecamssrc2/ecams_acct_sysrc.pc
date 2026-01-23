@@ -1,0 +1,780 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_acct_sysrc.pc                         │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ CheckIn 처리 공통                            │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 11                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include <ecams_util.h>
+#include <ecamsapi.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	RunSysrcRsrcScript		(char *pAcptNo, char *pPrcSys, char *pRunGbn, char *pRstCond);
+
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+#define DEBUG 	1
+char	gSpoolGB                     [2];
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Process_SYSRC                                    */
+/*	Action    : 서버재기동                                       */
+/*	Parameter :	pAcptNo   : 신청번호                             */
+/*	            pPrcSys   : 처리단계                             */
+/*	            pRstCond  : 처리결과                             */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+int	Process_SYSRC	   ( char *pAcptNo
+						, char *pPrcSys
+						, char *pRstCond
+						)
+{
+	int	errcnt0020;
+	int	errRtCode;
+	char	szPrcSys    [10];
+	char	szSysCD[6];
+	char	szDsnCD[11];
+	char	szRsrcName[512];
+	char	szItemID[13];
+
+
+	sprintf(gSpoolGB, "%s", "1");
+  	strcpy(szPrcSys, pPrcSys);
+  
+	EXEC SQL declare SYSED_ITEMIDUPDATE cursor for
+		SELECT distinct a.CR_SYSCD,
+			   a.CR_RSRCNAME,
+			   a.CR_DSNCD,
+			   b.cr_itemid
+		FROM   cmr1010 a, cmr0020 b
+		where a.cr_acptno= :pAcptNo
+		and   a.cr_syscd = b.cr_syscd
+		and   a.cr_dsncd = b.cr_dsncd
+		and   a.cr_rsrcname = b.cr_rsrcname
+		and   a.cr_itemid is null;
+		
+	
+	EXEC SQL open  SYSED_ITEMIDUPDATE;
+	errcnt0020 = 0;
+	while(1){
+		EXEC SQL fetch SYSED_ITEMIDUPDATE into :szSysCD,:szRsrcName,:szDsnCD,:szItemID;
+		
+		if (sqlca.sqlcode == 1403){
+			sprintf(gszLogMsg,"SYSED_ITEMIDUPDATE DB FETCH BREAK : [%s] [%d] [%s] "
+							  ,pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);			
+			break;
+		}
+
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"SYSED_ITEMIDUPDATE DB FETCH ERROR : [%s] [%d] [%s]"
+							  ,pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+		
+				
+		NotUseDataTruncate (szSysCD,   0x20);
+		NotUseDataTruncate (szDsnCD,   0x20);
+		NotUseDataTruncate (szItemID,   0x20);
+        sprintf(szRsrcName, "%s", trunc_char(szRsrcName));
+		
+		
+		EXEC SQL
+			UPDATE CMR1010
+			SET	 CR_ITEMID = :szItemID
+			WHERE cr_acptno = :pAcptNo
+			and   cr_syscd  = :szSysCD
+			and   cr_rsrcname = :szRsrcName
+			and   cr_dsncd  = :szDsnCD
+			and   cr_itemid is null;
+			
+		if (sqlca.sqlcode != 0){
+			sprintf(gszLogMsg,"SYSED_ITEMIDUPDATE CMR1010 UPDATE ERROR : [%s] [%d] [%s] [%s][%s][%s][%s][%s]"
+								  ,pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc,szItemID,pAcptNo,szSysCD,szRsrcName,szDsnCD);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			errcnt0020++;
+			continue;
+		}
+
+	}
+	EXEC SQL close SYSED_ITEMIDUPDATE;
+	
+	
+	
+	if (errcnt0020 > 0){
+		EXEC SQL ROLLBACK;
+		strcpy(pRstCond,"EROR");
+		return 1;
+	}	
+	EXEC SQL COMMIT;     
+
+	/*LOG*/sprintf(gszLogMsg,"[%s]<%s>처리시작",pAcptNo,pPrcSys);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+    /*-----------------------------------------------------------*/
+	/* 대상 서버에 올라간 자원에 대한 script 실행	  	         */
+	/*-----------------------------------------------------------*/
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] Before File Send RunSysrcRsrcScript  start",pAcptNo, pPrcSys);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	errRtCode = 0;
+	errRtCode = RunSysrcRsrcScript(pAcptNo, pPrcSys, "B", pRstCond);
+
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] Before File Send RunSysrcRsrcScript returned [%s][%d]",pAcptNo, pPrcSys,pRstCond,errRtCode);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	if (errRtCode != 0 ) {
+		strcpy(pRstCond, "EROR");
+		return  errRtCode;
+	}
+
+
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s] 처리완료  [%s]",pAcptNo, pPrcSys,pRstCond);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	return 0;
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : RunSysrcRsrcScript                              */
+/*	Action    : 컴파일/배포 목록 작성                            */
+/*	Parameter :	pAcptNo   : 신청번호                             */
+/*	            pPrcSys   : 처리단계                             */
+/*	            pRstCond  : 처리결과                             */
+/*	Return    : 오류건수                                         */
+/*---------------------------------------------------------------*/
+int 	RunSysrcRsrcScript	( char *pAcptNo
+							, char *pPrcSys
+						    , char *pRunGbn
+							, char *pRstCond
+							)
+{
+char	szSysCD                [dfSysCD];
+char	szDsnCD                [dfDsnCD];
+char	szRsrcName          [dfRsrcName];
+char	szRsrcCD              [dfRsrcCD];
+int		szVersion                       ;
+int		szBefVer                        ;
+char	szEditor              [dfEditor];
+int		szSerNo                         ;
+char	szSrcChg                   [1+1];
+char	szSeqYn                    [1+1];
+char	szAcptTotYn                [1+1];
+char	szRsrcTotYn                [1+1];
+char	szDirTotYn                 [1+1];
+char	szJobTotYn                 [1+1];
+char	szPri                       [50];
+char	szPrePri                    [50];
+char	szAplyDate                [14+1];
+char	szItemID              [dfItemID];
+char	szBaseItem            [dfItemID];
+char	szReqCD                [dfReqCD];
+char	szConfNo              [dfAcptNo];
+char	szQryCD                [dfReqCD];
+char	szSysGB                    [1+1];
+char	szSvrIP                [dfSvrIP];
+int		szPortNo                        ;
+char	szSvrCD                [dfSvrCD];
+char	szSvrName              [dfSvrNM];
+char	szDir                    [dfDir];
+char	szVolPath                [dfDir];
+char	szSysOS                [dfSysOS];
+int		szSvrSeq                        ;
+char	szInfo                  [dfInfo];
+char	szDirPath                [dfDir];
+char	szchmod                      [6];
+char	szchown                     [21];
+char	szchgrp                     [21];
+char	szJobCD                [dfJobCD];
+char	szSvrInfo            [dfSvrInfo];
+char	szReqPath                [dfDir];
+char	szRstFile           [dfFullPath];
+char	szBKRsrcName        [dfRsrcName];
+char	szChangDirPath           [dfDir];
+char	szChangDirPathTmp        [dfDir];
+char	szRemoteFileName    [dfFullPath];
+char	szLocalFileName     [dfFullPath];
+char	szBackFileName      [dfRsrcName];
+char	szRemote            [dfFullPath];
+char	szLocal             [dfFullPath];
+char	szCommand           [dfFullPath];
+char	idxFileName         [dfFullPath];
+char	szFileDate                [14+1];
+char	szSubSysOs             [dfSysCD];
+int		szSubPortNo                     ;
+char	szSubSvrIP             [dfSvrIP];
+char	szScriptType                [10];
+char    szRstMsg                   [512];
+int		szSubSvrSeq                     ;
+int		idxcnt                          ;
+int		nRst                            ;
+int		nComErrCnt                      ;
+int		szSysStep                       ;
+struct 	stat f_st                       ;
+long	lFileSize                       ;
+int		nRet                            ;
+int 	nCnt                            ;
+CMD_INFO	  CmdInfo                   ;
+char	szPrcSys              [10];
+
+	strcpy(szPrcSys, pPrcSys);
+	memset(szPrePri , 0x00, sizeof(szPrePri ));
+	memset(szReqPath, 0x00, sizeof(szReqPath));
+
+	/*-----------------------------------------------------------*/
+	/*	파일 생성시 파일이 저장될 경로 설정및 생성               */
+	/*-----------------------------------------------------------*/
+	SetTempDir("77",szReqPath);
+	strcat(szReqPath,pAcptNo);
+	if (access(szReqPath,F_OK) != 0)
+		Local_Dir_Make(szReqPath);
+
+	/*-----------------------------------------------------------*/
+	/*	소켓 명령 변수 초기화                                    */
+	/*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+	strcpy(CmdInfo.szAcptNo,pAcptNo);
+	strcpy(pRunGbn,"B");
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);
+	
+	idxcnt = 0;
+    /* 폐기가 아니고 컴파일속성 Yes
+       폐기이면서 폐기 시 파일삭제 */
+	EXEC SQL DECLARE SYSCOM_Rsrc3 CURSOR FOR
+		SELECT  DISTINCT
+		        A.CR_SYSCD
+		      , A.CR_DSNCD
+		      , A.CR_RSRCCD
+		      , A.CR_JOBCD
+		      , A.CR_RSRCNAME
+		      , A.CR_VERSION
+		      , A.CR_BEFVER
+		      , A.CR_EDITOR
+		      , A.CR_SERNO
+		      , A.CR_PRIORITY
+		      , A.CR_SRCCHG
+		      , NVL(A.CR_APLYDATE, '0')
+		      , A.CR_ITEMID
+		      , A.CR_QRYCD
+		      , A.CR_CONFNO
+		      , A.CR_BASEITEM
+		      , B.CR_QRYCD
+		      , B.CR_SYSGB
+		      , C.CM_SVRIP
+		      , C.CM_PORTNO
+		      , C.CM_SVRCD
+		      , C.CM_SVRNAME
+		      , C.CM_DIR
+		      , C.CM_VOLPATH
+		      , C.CM_SYSOS
+		      , C.CM_SEQNO
+		      , D.CM_INFO
+		      , F.CM_DIRPATH
+		      , SCRIPT_CHK(A.CR_SYSCD,A.CR_JOBCD,A.CR_RSRCCD,:szPrcSys,B.CR_QRYCD,:pRunGbn,C.CM_SVRCD,A.CR_QRYCD,A.CR_ITEMID)
+		  FROM  CMR1000 B
+		      , CMR1010 A
+		      , CMM0031 C
+		      , CMM0036 D
+		      , CMM0038 E
+		      , CMM0070 F
+		 WHERE  A.CR_ACPTNO = :pAcptNo
+		   AND  NVL(A.CR_SYSSTEP,0) = :szSysStep
+		   AND  A.CR_SRCCMP = 'Y'
+		   AND  A.CR_PRCDATE IS NULL
+		   AND  B.CR_ACPTNO = A.CR_ACPTNO
+		   AND  A.CR_SYSCD  = C.CM_SYSCD
+		   AND  (    (B.CR_QRYCD  = '04'        AND  C.CM_SVRCD  = '05')
+		         OR  (B.CR_QRYCD IN ('03','16') AND  C.CM_SVRCD  = '15')
+		         OR  (B.CR_QRYCD  = '06'        AND  C.CM_SVRCD  = '05')
+		        )
+		   AND  C.CM_CLOSEDT    IS NULL
+		   AND  C.CM_SVRSTOP = 'N'
+		   AND  D.CM_CLOSEDT    IS NULL
+		   AND  A.CR_SYSCD  = D.CM_SYSCD
+		   AND  A.CR_RSRCCD = D.CM_RSRCCD
+		   AND  A.CR_QRYCD != '05' AND SUBSTR(D.CM_INFO, 35,1) = '1'
+		   AND  A.CR_SYSCD  = E.CM_SYSCD
+		   AND  A.CR_RSRCCD = E.CM_RSRCCD
+		   AND  C.CM_SVRCD  = E.CM_SVRCD
+		   AND  C.CM_SEQNO  = E.CM_SEQNO
+		   AND  A.CR_SYSCD  = F.CM_SYSCD
+		   AND  A.CR_DSNCD  = F.CM_DSNCD
+		   AND  (    A.CR_PID IS NULL
+		         OR  NVL(A.CR_PUTCODE,'RTRY') = 'RTRY'
+		        )
+		 ORDER  BY  A.CR_PRIORITY, A.CR_SERNO;
+
+
+	EXEC SQL DECLARE SYSCOM_Rsrc3_sub CURSOR FOR
+		SELECT  A.CM_SYSOS
+		      , A.CM_SEQNO
+		      , A.CM_SVRIP
+		      , A.CM_PORTNO
+		  FROM  CMM0031 A
+		      , CMM0038 B
+		 WHERE  A.CM_SYSCD = :szSysCD
+		   AND  A.CM_SVRCD = :szSvrCD
+		   AND  A.CM_CLOSEDT IS NULL
+		   AND  A.CM_SVRSTOP = 'N'
+		   AND  A.CM_SYSCD = B.CM_SYSCD
+		   AND  A.CM_SVRCD = B.CM_SVRCD
+		   AND  A.CM_SEQNO = B.CM_SEQNO
+		   AND  B.CM_RSRCCD = :szRsrcCD;
+
+   	szSysStep = 0;
+
+	EXEC SQL open  SYSCOM_Rsrc3;
+    while (1) {
+		EXEC SQL fetch SYSCOM_Rsrc3
+			into  :szSysCD
+			    , :szDsnCD
+			    , :szRsrcCD
+			    , :szJobCD
+			    , :szRsrcName
+			    , :szVersion
+			    , :szBefVer
+			    , :szEditor
+			    , :szSerNo
+			    , :szPri
+			    , :szSrcChg
+			    , :szAplyDate
+			    , :szItemID
+			    , :szReqCD
+			    , :szConfNo
+			    , :szBaseItem
+			    , :szQryCD
+			    , :szSysGB
+			    , :szSvrIP
+			    , :szPortNo
+			    , :szSvrCD
+			    , :szSvrName
+			    , :szDir
+			    , :szVolPath
+			    , :szSysOS
+			    , :szSvrSeq
+			    , :szInfo
+			    , :szDirPath
+			    , :szScriptType;
+
+		if (sqlca.sqlcode == 1403) {
+			sprintf(gszLogMsg,"RunSysrcRsrcScript Before DB FETCH 1403 : [%s] [%d] [%d] [%s]", pAcptNo, szSerNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"RunSysrcRsrcScript Before DB FETCH ERROR : [%s] [%d] [%d] [%s]", pAcptNo, szSerNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+
+		NotUseDataTruncate (szSysCD   , 0x20);
+		NotUseDataTruncate (szDsnCD   , 0x20);
+		NotUseDataTruncate (szRsrcCD  , 0x20);
+		NotUseDataTruncate (szEditor  , 0x20);
+		NotUseDataTruncate (szSrcChg  , 0x20);
+		NotUseDataTruncate (szAplyDate, 0x20);
+		NotUseDataTruncate (szItemID  , 0x20);
+		NotUseDataTruncate (szReqCD   , 0x20);
+		NotUseDataTruncate (szConfNo  ,	0x20);
+		NotUseDataTruncate (szBaseItem,	0x20);
+		NotUseDataTruncate (szQryCD   , 0x20);
+		NotUseDataTruncate (szSysGB   , 0x20);
+		NotUseDataTruncate (szSvrIP   , 0x20);
+		NotUseDataTruncate (szSvrCD   , 0x20);
+		NotUseDataTruncate (szSvrName , 0x20);
+		NotUseDataTruncate (szDir     , 0x20);
+		NotUseDataTruncate (szVolPath , 0x20);
+		NotUseDataTruncate (szSysOS   , 0x20);
+		NotUseDataTruncate (szInfo    , 0x20);
+		NotUseDataTruncate (szPri     , 0x20);
+		NotUseDataTruncate (szJobCD   , 0x20);
+		NotUseDataTruncate (szScriptType, 0x20);
+
+		sprintf(szRsrcName, "%s", trunc_char(szRsrcName));
+		sprintf(szDirPath , "%s", trunc_char(szDirPath ));
+		strcpy(szBKRsrcName,szRsrcName);
+
+        /*-------------------------------------------------------*/
+		/*	결과파일명                                           */
+		/*-------------------------------------------------------*/
+		sprintf(szRstFile,"%s/%s.%d.%s.%s.%d.result", gszTempPath, pAcptNo, szSerNo,szPrcSys,szSvrIP,szSvrSeq);
+		
+		nRet = ChangeVolPath_acpt(pAcptNo,szSerNo,pPrcSys,szSysCD,szSvrCD,szSvrSeq,szChangDirPath);
+		if (nRet != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] ChangeVolPath_acpt Return Error [%d]\n",pAcptNo,szSerNo,pPrcSys,nRet);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+			strcpy(pRstCond,"EROR");
+			Result_Make(szRstFile,"경로변환 실패",szSvrIP,pPrcSys,pRstCond);
+			CMR1011_Make (szSysCD, szSvrIP, pAcptNo, szSerNo, szRstFile, 0, pRstCond, szSvrName, pPrcSys,szSvrCD,szSvrSeq,pRunGbn);
+			continue;
+		}
+		/*
+		ChangeVolPath(szSysCD , szSvrCD, szRsrcCD, szSvrSeq, szDirPath, szChangDirPathTmp);
+
+		if (cmp_right_char(szChangDirPathTmp, 1, "/") == 0){
+			sprintf(szChangDirPathTmp, "%s", left_char(szChangDirPathTmp, strlen(szChangDirPathTmp) - 1));
+		}
+		Convert_WinDirPath (szSysOS, szChangDirPathTmp, szChangDirPath);
+		*/
+		
+		if (strncmp(szReqCD,"05",2) == 0) {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%d][SYSRC]ECAMS_ACCT1 폐기 시 처리안함 [%s]", pAcptNo,szSerNo,szRsrcName);
+	    	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+			strcpy(pRstCond,"0000");
+			Result_Make(szRstFile,"폐기 작업-처리안함",szSvrIP,"SYSRC",pRstCond);
+			CMR1011_Make (szSysCD, szSvrIP, pAcptNo, szSerNo, szRstFile, szSysStep, pRstCond, szSvrName, "SYSRC",szSvrCD,szSvrSeq,pRunGbn);
+			continue;
+		}
+		
+		/*-------------------------------------------------------*/
+		/*	개발서버에 파일저장 경로+파일명                      */
+		/*-------------------------------------------------------*/
+		strcpy(szRemoteFileName,szRsrcName);
+		sprintf(szLocalFileName,"%s.%s.%d",szRsrcName, pAcptNo, szSerNo);
+		sprintf(szLocal,"%s/%s",szReqPath,szLocalFileName);
+
+		Result_Make(szRstFile,"운영적용 쉘실행  전 CMR1011 생성",szSvrIP,"SYSRC","0000");
+		CMR1011_Make (szSysCD, szSvrIP, pAcptNo, szSerNo, szRstFile, szSysStep, "0000", szSvrName, "SYSRC",szSvrCD,szSvrSeq,pRunGbn);
+
+		/*-------------------------------------------------------*/
+		/*	처리결과 코드 초기화                                 */
+		/*-------------------------------------------------------*/
+		EXEC SQL
+			UPDATE  CMR1011
+			   SET  CR_PRCRST  = NULL
+			      , CR_PUTCODE = NULL
+			 WHERE  CR_ACPTNO = :pAcptNo
+			   AND  CR_PRCSYS = :szPrcSys
+			   AND  CR_SERNO  = :szSerNo
+  		       AND  CR_SVRSEQ = :szSvrSeq
+  		       AND  CR_IPADDR = :szSvrIP
+			   AND  CR_SVRCD  = :szSvrCD
+			   AND  CR_RUNGBN = :pRunGbn;
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+			sprintf(gszLogMsg,"cr_prcrst update Err!!! : [%s] [%d] [%s]", pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			strcpy(pRstCond,"EROR");
+			return sqlca.sqlcode;
+		}
+		EXEC SQL COMMIT;
+
+
+		EXEC SQL
+			UPDATE  CMR1010
+			   SET  CR_PUTCODE = NULL
+			 WHERE  CR_ACPTNO = :pAcptNo
+			   AND  CR_SERNO  = :szSerNo;
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+			sprintf(gszLogMsg,"cr_putcode clear Err!!! : [%s] [%d] [%s]", pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			strcpy(pRstCond,"EROR");
+			return sqlca.sqlcode;
+		}
+		EXEC SQL COMMIT;
+
+        EXEC SQL
+			SELECT  b.CM_SEQYN
+			      , b.CM_ACPTTOTYN
+			      , b.CM_RSRCTOTYN
+			      , b.CM_DIRTOTYN
+			      , b.CM_JOBTOTYN
+			  INTO  :szSeqYn
+			  	  , :szAcptTotYn
+			  	  , :szRsrcTotYn
+			  	  , :szDirTotYn
+			  	  , :szJobTotYn
+			  FROM  CMM0036 C,CMM0033 b,CMM0030 a
+			 WHERE  a.CM_SYSCD  = :szSysCD
+	           AND  B.CM_SYSCD = A.CM_SYSCD
+	           AND  B.CM_JOBCD = DECODE(substr(a.CM_SYSINFO,8,1), '1', :szJobCD, '****')
+	           AND  B.CM_RSRCCD = :szRsrcCD
+			   AND  B.CM_QRYCD  = :szQryCD
+			   AND  B.CM_PRCSYS = :szPrcSys
+			   AND  B.CM_SYSCD=C.CM_SYSCD
+			   AND  B.CM_RSRCCD=C.CM_RSRCCD
+			   AND  B.CM_ITEMID=DECODE(SUBSTR(C.CM_INFO,29,1),'0','************',:szItemID)
+	           AND  B.CM_RUNGBN = :pRunGbn;
+
+		if (sqlca.sqlcode != 0) {
+			sprintf(gszLogMsg, "[%s] SQLErrCheck : 빌드/릴리즈  정보 오류 syscd[%s]rsrccd[%s]jobcd[%s]prcsys[%s]qrycd[%s]szSvrCD[%s]szReqCD[%s]szItemID[%s]pRunGbn[%s] [%d][%s]",
+			        pAcptNo,szSysCD,szRsrcCD,szJobCD,szPrcSys,szQryCD,szSvrCD,szReqCD,szItemID,pRunGbn,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return sqlca.sqlcode;
+		}
+		NotUseDataTruncate (szSeqYn    ,	0x20);
+		NotUseDataTruncate (szAcptTotYn,	0x20);
+		NotUseDataTruncate (szRsrcTotYn,	0x20);
+		NotUseDataTruncate (szDirTotYn ,	0x20);
+		NotUseDataTruncate (szJobTotYn ,	0x20);
+		
+		if (strlen(szPrePri) == 0) {
+			strcpy(szPrePri, szPri);
+		}
+
+		if (strcmp(szPrePri, szPri) != 0) {
+			/*LOG*/sprintf(gszLogMsg,"ECAMS_ACCT1	Process_SYSCOM(<%s><%s>) [%s][%s]순위 처리 시작 \n",pAcptNo,szPrcSys,szPri,szPrePri);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+			do {
+				/*-------------------------------------------*/
+				/* 현재 우선처리 순위중 처리미완료건 조회    */
+				/*-------------------------------------------*/
+				EXEC SQL
+					SELECT  COUNT(*)
+					  INTO  :nCnt
+					  FROM  CMR1010 a
+					      , CMR1011 b
+					      , CMM0036 c
+					 WHERE  a.CR_ACPTNO   = :pAcptNo
+					   AND  a.CR_PRIORITY = :szPrePri
+					   AND  a.CR_ACPTNO   = b.CR_ACPTNO
+					   AND  a.CR_SERNO    = b.CR_SERNO
+					   AND  b.CR_PRCSYS   = :szPrcSys
+		               AND  b.CR_RUNGBN   = :pRunGbn
+					   AND	a.CR_SYSCD	  = c.CM_SYSCD
+					   AND  a.CR_RSRCCD   = c.CM_RSRCCD
+					   AND  a.CR_QRYCD != '05' AND SUBSTR(C.CM_INFO, 50,1) = '1'
+					   AND  b.CR_PRCRST IS NULL;
+
+				if (sqlca.sqlcode != 0) {
+					nCnt = 0;
+				}
+				sleep(1);
+			} while(nCnt != 0);
+
+			do {
+				/*-----------------------------------------------*/
+			    /*	해당 순위가 완료 되었으면 처리된 건에 오류   */
+			    /*  결과가 있는지 조회                           */
+			    /*-----------------------------------------------*/
+				EXEC SQL
+					SELECT  COUNT(*)
+					  INTO  :nCnt
+					  FROM  CMR1010 a
+					      , CMR1011 b
+					      , CMM0036 c
+					 WHERE  a.CR_ACPTNO   = :pAcptNo
+					   AND  a.CR_PRIORITY = :szPrePri
+					   AND  a.CR_ACPTNO   = b.CR_ACPTNO
+					   AND  a.CR_SERNO    = b.CR_SERNO
+					   AND  b.CR_PRCSYS   = :szPrcSys
+		               AND  b.CR_RUNGBN   = :pRunGbn
+					   AND	a.CR_SYSCD	  = c.CM_SYSCD
+					   AND  a.CR_RSRCCD   = c.CM_RSRCCD
+					   AND  a.CR_PRCDATE IS NULL
+					   AND  a.CR_QRYCD != '05' AND SUBSTR(c.CM_INFO, 50,1) = '1'
+					   AND  b.CR_PRCRST   != '0000';
+
+				if (nCnt != 0) {
+					/*LOG*/sprintf(gszLogMsg, "ECAMS_ACCT1	Process_SYSCOM(<%s><%s>) 상위 우선순위 오류처리 대기 [%s] \n",pAcptNo,szPrcSys,szPrePri);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+					EXEC SQL
+						DELETE  CMR1011
+						 WHERE  CR_ACPTNO = :pAcptNo
+						   AND  CR_SERNO  = :szSerNo
+						   AND  CR_SVRSEQ = :szSvrSeq
+						   AND  CR_PRCSYS = :szPrcSys
+						   AND  CR_SVRCD  = :szSvrCD
+						   AND  CR_RUNGBN = :pRunGbn;
+
+					EXEC SQL COMMIT;
+					exit (1);
+				}
+				sleep(1);
+			} while( nCnt != 0);
+		}
+		strcpy(szPrePri, szPri);
+
+
+		/*-----------------------------------------------*/
+		/*	신청건 일괄컴파일에 대한 처리                          */
+		/*-----------------------------------------------*/
+		if (strcmp(szAcptTotYn,"Y") == 0 || strcmp(szRsrcTotYn,"Y") == 0 || strcmp(szDirTotYn,"Y") == 0 || strcmp(szJobTotYn,"Y") == 0) {
+			EXEC SQL OPEN SYSCOM_Rsrc3_sub;
+			while (1) {
+		        EXEC SQL fetch SYSCOM_Rsrc3_sub
+		        	INTO  :szSubSysOs
+		        		, :szSubSvrSeq
+		        		, :szSubSvrIP
+		        		, :szSubPortNo;
+
+				if (sqlca.sqlcode == 1403)	break;
+
+				NotUseDataTruncate (szSubSysOs, 0x20);
+				NotUseDataTruncate (szSubSvrIP, 0x20);
+				/*
+				ChangeVolPath(szSysCD , szSvrCD, szRsrcCD, szSubSvrSeq, szDirPath, szChangDirPathTmp);
+
+				if (cmp_right_char(szChangDirPathTmp, 1, "/") == 0) {
+					sprintf(szChangDirPathTmp, "%s", left_char(szChangDirPathTmp, strlen(szChangDirPathTmp) - 1));
+				}
+				Convert_WinDirPath (szSubSysOs, szChangDirPathTmp, szChangDirPath);
+				*/
+				/*---------------------------------------*/
+				/*	결과파일명                           */
+				/*---------------------------------------*/
+				sprintf(szRstFile,"%s/%s.%d.%s.%s.%d.result", gszTempPath, pAcptNo, szSerNo,szPrcSys,szSvrIP,szSubSvrSeq);
+				
+				nRet = ChangeVolPath_acpt(pAcptNo,szSerNo,pPrcSys,szSysCD,szSvrCD,szSubSvrSeq,szChangDirPath);
+				if (nRet != 0) {
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] ChangeVolPath_acpt Return Error [%d]\n",pAcptNo,szSerNo,pPrcSys,nRet);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+					strcpy(pRstCond,"EROR");
+					Result_Make(szRstFile,"경로변환 실패",szSvrIP,pPrcSys,pRstCond);
+					CMR1011_Make (szSysCD, szSvrIP, pAcptNo, szSerNo, szRstFile, 0, pRstCond, szSvrName, pPrcSys,szSvrCD,szSvrSeq,pRunGbn);
+					continue;
+				}
+				/*---------------------------------------*/
+				/*	개발서버에 파일저장 경로+파일명      */
+				/*---------------------------------------*/
+				strcpy(szRemoteFileName,szRsrcName);
+				sprintf(szLocalFileName,"%s.%s.%d",szRsrcName, pAcptNo, szSerNo);
+				sprintf(szLocal,"%s/%s",szReqPath,szLocalFileName);
+				++idxcnt;
+				if (eCAMS_ACComp_Fork("SYSCOM",pAcptNo, szSerNo, szSubSvrIP,
+						    	szSysCD, szRsrcCD, szDsnCD, szSysStep ,szReqCD,szPrcSys,szChangDirPath,
+								szRemoteFileName, szSubPortNo, "000001", szSvrCD, szSubSvrSeq,1,pRunGbn) != 0) {
+					/*LOG*/sprintf(gszLogMsg, "ECAMS_ACCT1	[%s][%s][%d] eCAMS_ACComp_Fork Fail \n",pAcptNo,szPrcSys,szSerNo);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+					strcpy(pRstCond,"9999");
+					Result_Make(szRstFile,"eCAMS_ACComp_Fork 처리중 오류 [오류건재처리요망] ",szSubSvrIP,"SYSRC",pRstCond);
+					CMR1011_Make (szSysCD, szSubSvrIP, pAcptNo, szSerNo, szRstFile, szSysStep, pRstCond, szSvrName, "SYSRC",szSvrCD,szSubSvrSeq,pRunGbn);
+					exit(1);
+				}
+			}
+			EXEC SQL close SYSCOM_Rsrc3_sub;
+
+			EXEC SQL
+				UPDATE  CMR1010
+				   SET  CR_SRCCMP = 'N'
+				 WHERE  CR_ACPTNO = :pAcptNo
+				   AND  CR_RSRCCD = DECODE(:szRsrcTotYn,'Y',:szRsrcCD,CR_RSRCCD)
+				   AND  CR_JOBCD  = DECODE(:szJobTotYn,'Y',:szJobCD,CR_JOBCD)
+				   AND  CR_DSNCD  = DECODE(:szDirTotYn,'Y',:szDsnCD,CR_DSNCD);
+			EXEC SQL COMMIT;
+			
+			EXEC SQL close SYSCOM_Rsrc3;
+			EXEC SQL open  SYSCOM_Rsrc3;
+		}
+		else {
+			++idxcnt;
+			/*-----------------------------------------------*/
+			/*	쉘순차처리에  대한 처리                      */
+			/*-----------------------------------------------*/
+			if (strcmp(szSeqYn,"Y") == 0) {
+				eCAMS_ACComp_Fork("SYSCOM",pAcptNo, szSerNo, szSvrIP,
+						    	szSysCD, szRsrcCD, szDsnCD, szSysStep ,szReqCD,szPrcSys,szChangDirPath,
+								szRemoteFileName, szPortNo, "000001", szSvrCD, szSvrSeq,1,pRunGbn);
+			}
+			else{
+				eCAMS_ACComp_Fork("SYSCOM",pAcptNo, szSerNo, szSvrIP,
+						    	szSysCD, szRsrcCD, szDsnCD,szSysStep ,szReqCD,szPrcSys,szChangDirPath,
+								szRemoteFileName, szPortNo, "000001", szSvrCD, szSvrSeq,0,pRunGbn);
+			}
+		}
+	}
+    EXEC SQL close SYSCOM_Rsrc3;
+	
+	if (idxcnt > 0) {
+		/*-----------------------------------------------------------*/
+		/*	처리완료 여부 체크                                       */
+		/*-----------------------------------------------------------*/
+		wait_Accomp_Fork("SYSCOM",pAcptNo);
+	}
+	nComErrCnt = 0;
+
+	/*-----------------------------------------------------------*/
+	/*	처리결과 오류건수 조회                                   */
+	/*-----------------------------------------------------------*/
+
+	EXEC SQL
+		SELECT  COUNT(a.CR_SEQNO)
+		  INTO  :nComErrCnt
+		  FROM  CMR1011 a
+		      , CMR1010 b
+		 WHERE  a.CR_ACPTNO  = :pAcptNo
+		   AND  b.CR_PRCDATE IS NULL
+		   AND  a.CR_ACPTNO  = b.CR_ACPTNO
+		   AND  a.CR_SERNO   = b.CR_SERNO
+		   AND  b.CR_STATUS != '3'
+		   AND  a.CR_PRCSYS  = :szPrcSys
+		   AND  a.CR_RUNGBN  = :pRunGbn
+		   AND  NVL(a.CR_PUTCODE,'NA') != '0000';
+
+		sprintf(gszLogMsg,"error count 1!!! : [%s] [%s] [%d]", pAcptNo, pRunGbn, nComErrCnt);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+	/*-----------------------------------------------------------*/
+	/*	처리단계 변경                                            */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		UPDATE  CMR1010
+		   SET  CR_SYSSTEP = DECODE(NVL(CR_PUTCODE,'0000'),'0000', 1, 0)
+		      , CR_PUTCODE = DECODE(NVL(CR_PUTCODE,'0000'),'0000', NULL, CR_PUTCODE)
+			  , CR_RUNGBN  = :pRunGbn
+		 WHERE  CR_ACPTNO = :pAcptNo
+		   AND  CR_PRCDATE IS NULL
+		   AND  NVL(CR_SYSSTEP,0) < 1;
+
+	if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+		sprintf(gszLogMsg,"Step Update Err!!! : [%s] [%d] [%s]", pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		strcpy(pRstCond,"EROR");
+		return sqlca.sqlcode;
+	}
+
+	EXEC SQL EXECUTE
+    	BEGIN
+	        UPDATE_1000STEP(:pAcptNo,:szSysStep);
+        END;
+    END-EXEC;
+
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[%s] CMR1000 SYSSTEP UPDATE ERROR [%d] [%s]", pAcptNo,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		strcpy(pRstCond,"EROR");
+		return sqlca.sqlcode;
+	}
+	EXEC SQL COMMIT;
+
+	if (nComErrCnt != 0) {
+		strcpy(pRstCond,"EROR");
+		return nComErrCnt;
+	}
+	strcpy(pRstCond, "0000");
+
+	return nComErrCnt;
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

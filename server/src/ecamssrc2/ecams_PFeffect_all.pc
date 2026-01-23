@@ -1,0 +1,113 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_PFeffect_all.pc                        │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ProFrame 테이블 CRUD 영향도 작성             │
+ │            │ - 체크인대상 리소스에 대하여 참조하는        │
+ │            │   CRUD METRIX 정보를 프로프레임에 요청하여   │
+ │            │   대상정보를 형상관리에서 관리한다.          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2008. 11. 24                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+#define		dfMain		1
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+FILE *fp;
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+/*****************************************************************/
+/*                                                               */
+/*		ProFrame 영향도 목록 작성   처리   MAIN                  */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char	szSysCD              [5+1];
+char	szRsrcName           [201];
+char	szRsrcTYPE         [100+1];
+
+
+	if (argc != 2) {
+        printf ("Usage : %s <SysCD> \n", argv[0]);
+        exit (0);
+    }
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+		
+		
+    EXEC SQL DECLARE EFF_CURSOR CURSOR FOR
+		SELECT  A.CR_SYSCD
+		      , C.CM_CODENAME
+		      , A.CR_RSRCNAME
+		  FROM  CMR0020 A
+		      , CMM0036 B
+		      , CMM0020 C
+		 WHERE  A.CR_SYSCD = :argv[1]
+		   AND  A.CR_SYSCD  = B.CM_SYSCD
+		   AND  A.CR_RSRCCD = B.CM_RSRCCD
+		   AND  SUBSTR(B.CM_INFO, 27, 1) = '1'
+		   AND  SUBSTR(B.CM_INFO, 34, 1) = '1'
+		   AND  C.CM_MACODE = 'RSRCTYPE'
+		   AND  C.CM_MICODE = A.CR_RSRCCD
+		 ORDER  BY  A.CR_SYSCD, C.CM_CODENAME, A.CR_RSRCNAME;
+
+	    EXEC SQL OPEN  EFF_CURSOR;
+	    if (sqlca.sqlcode != 0) {
+	        exit (1);
+	    }
+
+	    while (1) {
+			EXEC SQL fetch EFF_CURSOR
+				INTO  :szSysCD
+					, :szRsrcTYPE
+					, :szRsrcName;
+
+	        if (sqlca.sqlcode != 0) {
+	            break;
+	        }
+
+			NotUseDataTruncate (szSysCD   , 0x20);
+			NotUseDataTruncate (szRsrcName, 0x20);
+			sprintf(szRsrcTYPE, "%s", trunc_char(szRsrcTYPE));
+
+			printf("영향도분석 : [%s] [%s] [%s]\n", szSysCD, szRsrcTYPE, szRsrcName);
+			
+			Process_PFEffect(szSysCD, szRsrcTYPE, szRsrcName, (char *)"R", szRsrcName);
+			/*Process_PFEffect(szSysCD, szRsrcTYPE, szRsrcName, (char *)"I", szRsrcName);*/
+		
+	   	}
+	    EXEC SQL close EFF_CURSOR;
+	    
+    EXEC SQL COMMIT WORK RELEASE;
+
+    exit (0);
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

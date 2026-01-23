@@ -1,0 +1,604 @@
+/*-----------------------------------------------------------------
+ ┌──────┬────────────────────────┐
+ │ 프로그램명 │ ecams_sendmail.pc                              │
+ ├──────┼────────────────────────┤
+ │ 기      능 │ 결재관련 알림메세지 처리 MAIN                  │
+ ├──────┼────────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08.                                  │
+ ├──────┼────────────────────────┤
+ │ 작  성  자 │ 최   병   남                                   │
+ └──────┴────────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*		외부함수 include										 */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		내부함수			                                     */
+/*---------------------------------------------------------------*/
+int  	Auto_Mail_Make 		();
+int  	Diff_Mail_Make 		();
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+int     cSockId    ;                  /* Connect Socket ID       */
+int  	gRcvFd     ;                  /* 수신용 File Pointer     */
+int  	gSndFd     ;                  /* 송신용 File Pointer     */
+int  	gProcStep  ;                  /* 송신/수신 상태          */
+int  	gProcWork  ;                  /* 송신/수신 여부          */
+int  	gFileOffset;                  /* 파일 송신 OffSet        */
+char    gJobGub    [2]             ;  /* 처리구분                */
+char    systime  [16], sysdate [16];  /* 시스템일자, 시간        */
+char	szSvRecvUser          [dfEditor];
+char	szSvEditor            [dfEditor];
+char	szSvAcptNo            [dfAcptNo];
+char	szAcptNo              [dfAcptNo];
+char	szMailCode                 [100];
+char	szEditor              [dfEditor];
+char	szRecvUser            [dfEditor];
+char	szUserNM                   [100];
+char	szPassCD                 [200+1];
+char	szMailFile          [dfFullPath];
+char	szMailPath	             [dfDir];
+char	szFileNM            [dfFullPath];
+char    szMailIp                    [20];
+char	szBaseDt                    [20];
+char	szSendUser                  [20];
+char	szMailGbn                    [5];
+char    szSendDate                  [15];
+char    szURL                       [100];
+int 	nRowCnt                         ;
+int     mailPort                        ;
+FILE	*SrcPtr                         ;
+CMD_INFO		CmdInfo                 ;
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*			형상관리 결재관련 메세지 전송처리 MAIN               */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char** envp)
+{
+	int nRet = 0;
+    
+	if (argc < 2) {
+        printf ("Usage : %s <MAILGBN> \n", argv[0]);
+        exit (0);
+    }
+	
+	strcpy(szMailGbn,argv[1]);
+	NotUseDataTruncate (szMailGbn, 0x20);
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");
+
+	/*-----------------------------------------------------------*/
+	/* 	신청번호 , 시리얼번호 초기화	          			     */
+	/*-----------------------------------------------------------*/
+	sprintf(szAcptNo   , "%s", "00000000000");
+	gEnvp = envp;
+
+	/*-----------------------------------------------------------*/
+	/*	소켓 명령 변수 초기화                                    */
+	/*-----------------------------------------------------------*/
+	InitCmdInfo(&CmdInfo);
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);
+
+	/*-----------------------------------------------------------*/
+    /*   Signal Define			                                 */
+    /*-----------------------------------------------------------*/
+    DefineSignal ();
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		printf("connect error \n");
+		exit(1);
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", gszTempPath);
+
+	/*-----------------------------------------------------------*/
+    /*   기준일자 조회                                           */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  TO_CHAR(SYSDATE, 'YYYY/MM/DD'),TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+		  INTO  :szBaseDt, :szSendDate		  	
+		  FROM  DUAL;
+		  
+	NotUseDataTruncate (szBaseDt, 0x20);
+	NotUseDataTruncate (szSendDate, 0x20);
+		  
+	/*-----------------------------------------------------------*/
+    /*   메일서버 추출                                           */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_DIRPATH,CM_PORTNO,CM_SVRIP
+		  INTO  :szMailPath,:mailPort,szMailIp		  	
+		  FROM  CMM0015
+		 WHERE  CM_STNO='ECAMS'
+		   AND  CM_GBNCD='MS';
+		  
+	NotUseDataTruncate (szMailPath, 0x20);
+	NotUseDataTruncate (szMailIp, 0x20);
+	
+	sprintf(CmdInfo.szServerIP,"%s", szMailIp);
+	CmdInfo.nPort = mailPort;
+	sprintf(szMailFile,"covm_%s",szSendDate);
+	
+	/*-----------------------------------------------------------*/
+    /*   형상관리 URL 추출                                       */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_URL
+		  INTO  :szURL		  	
+		  FROM  CMM0010
+		 WHERE  CM_STNO='ECAMS';
+		  
+	NotUseDataTruncate (szURL, 0x20);
+	
+	/*-----------------------------------------------------------*/
+    /*   메일송신자 사번 (관리자)                                */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_ADMINUSR
+		  INTO  :szSendUser
+		  FROM  CMM0011
+		 WHERE  CM_SMSNO = 'ECAMS';
+
+	NotUseDataTruncate (szSendUser, 0x20);
+	
+	sprintf(szFileNM   , "%s/%s", gszTempPath, szMailFile);	 
+	
+	if (strcmp(szMailGbn,"AMAIL")==0) {
+		/* 후열 미확인 명세 및 오류발생 건 */
+		printf("Auto_Mail_Make \n");
+		nRet = Auto_Mail_Make();
+		
+	} else {
+		/* 파일대사 미조치 건 */
+		nRet = Diff_Mail_Make();
+	}		 
+	if (nRet != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[ecams_sendmail] Mail Send FILE 작성 실패 DATE[%s] GUBUN[%s]\n"
+								,szBaseDt,szMailGbn);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit(1);
+			
+	} else {		
+		strcpy(CmdInfo.szJobGub, "F");
+		sprintf(CmdInfo.szLocal , "%s", szFileNM);
+		sprintf(CmdInfo.szRemote, "%s/%s", szMailPath, szMailFile);
+		LookCMD_INFO (&CmdInfo);
+		Server_Cmd_JOB(&CmdInfo);
+		if(strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_sendmail] 작성된 Mail FILE 전송실패 IP[%s] Local[%s] Remote[%s] RstCond[%s]\n"
+									,CmdInfo.szServerIP,CmdInfo.szLocal
+									,CmdInfo.szRemote, CmdInfo.szRstCond);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			exit(1);
+		}
+		strcpy(CmdInfo.szJobGub, "S");
+		sprintf(CmdInfo.szCommand, "chmod 777 %s/%s", szMailPath, szMailFile);
+		LookCMD_INFO (&CmdInfo);
+		Server_Cmd_JOB(&CmdInfo);
+		if(strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_sendmail] 작성된 Mail FILE 전송 후 권한변경 IP[%s] Local[%s] Remote[%s] RstCond[%s]\n"
+									,CmdInfo.szServerIP,CmdInfo.szLocal
+									,CmdInfo.szRemote, CmdInfo.szRstCond);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		}
+		/*remove (szFileNM);*/
+		
+		if (strcmp(szMailGbn,"DMAIL")==0) {
+			EXEC SQL
+				UPDATE CMR9910
+				   SET CR_STATUS='1'
+				       ,CR_CONFDATE=SYSDATE
+				 WHERE CR_ACPTNO='MAILFILEDIFF'
+				   AND CR_STATUS='0';
+			EXEC SQL COMMIT;
+				 
+			EXEC SQL
+				DELETE CMR9910
+				 WHERE CR_ACPTNO='MAILFILEDIFF'
+				   AND TO_CHAR(CR_CONFDATE,'YYYYMMDD')<TO_CHAR(SYSDATE,'YYYYMMDD');
+			EXEC SQL COMMIT;
+		}
+		
+	}		
+
+	exit (0);
+}
+/*---------------------------------------------------------------*/
+/*		후열 미결재내역 및 컴파일오류에 대한 메일반송            */
+/*---------------------------------------------------------------*/
+int    Auto_Mail_Make () 
+{
+	char acptno_1         [5];
+	char acptno_2         [3];
+	char acptno_3         [7];
+
+	EXEC SQL DECLARE SENDMAIL_LIST CURSOR FOR
+		SELECT  B.CR_ACPTNO ACPTNO
+	          , '후열요청'
+	          , B.CR_EDITOR
+	          , A.CR_TEAM RECVUSER
+	          , C.CM_USERNAME
+	          , B.CR_PASSCD
+	      FROM  CMR9900 A
+	          , CMR1000 B
+	          , CMM0040 C
+	     WHERE  A.CR_QRYCD = '04'
+           AND  A.CR_ACPTNO = B.CR_ACPTNO
+	       AND  A.CR_LOCAT <> '00'
+	       AND  A.CR_STATUS = '0'
+	       AND  A.CR_CONGBN = '4'
+	       AND  B.CR_STATUS <> '3'
+	       AND  B.CR_PRCDATE IS NOT NULL
+	       AND  B.CR_EDITOR = C.CM_USERID
+	       AND  A.CR_TEAMCD NOT IN ('4','1')
+	     GROUP BY B.CR_ACPTNO,B.CR_EDITOR,A.CR_TEAM,C.CM_USERNAME,B.CR_PASSCD
+	     UNION ALL
+	    SELECT  B.CR_ACPTNO ACPTNO
+	          , '후열요청'
+	          , B.CR_EDITOR
+	          , E.CM_USERID RECVUSER
+	          , C.CM_USERNAME
+	          , B.CR_PASSCD
+	      FROM  CMR9900 A
+	          , CMR1000 B
+	          , CMM0040 C
+	          , CMM0043 D
+	          , CMM0040 E
+	     WHERE  A.CR_QRYCD = '04'
+           AND  A.CR_ACPTNO = B.CR_ACPTNO
+	       AND  A.CR_LOCAT <> '00'
+	       AND  A.CR_STATUS = '0'
+	       AND  A.CR_CONGBN = '4'
+	       AND  B.CR_STATUS <> '3'
+	       AND  B.CR_PRCDATE IS NOT NULL
+	       AND  B.CR_EDITOR = C.CM_USERID
+	       AND  A.CR_TEAMCD ='4'
+	       AND  A.CR_TEAM = D.CM_RGTCD
+	       AND  D.CM_USERID = E.CM_USERID
+	       AND  E.CM_ACTIVE = '1' 
+	     GROUP BY B.CR_ACPTNO,B.CR_EDITOR,E.CM_USERID,C.CM_USERNAME,B.CR_PASSCD
+         UNION ALL
+	    SELECT  B.CR_ACPTNO ACPTNO
+	          , '후열요청'
+	          , B.CR_EDITOR
+	          , B.CR_EDITOR RECVUSER
+	          , C.CM_USERNAME
+	          , B.CR_PASSCD
+	      FROM  CMR1000 B
+	          , CMM0040 C
+	     WHERE  B.CR_QRYCD='04'
+           AND  B.CR_STATUS <> '3'
+           AND  B.CR_PRCDATE IS NOT NULL
+	       AND  B.CR_EDITOR = C.CM_USERID
+           AND  B.CR_ACPTNO IN (SELECT DISTINCT X.CR_ACPTNO 
+                                  FROM CMR1000 X,CMR9900 Y
+                                 WHERE X.CR_QRYCD='04'
+                                   AND X.CR_STATUS<>'3'
+                                   AND X.CR_PRCDATE IS NOT NULL
+                                   AND X.CR_ACPTNO=Y.CR_ACPTNO
+                                   AND Y.CR_LOCAT<>'00'
+                                   AND Y.CR_CONGBN='4'
+                                   AND Y.CR_STATUS='0')
+	     UNION ALL
+	    SELECT  B.CR_ACPTNO ACPTNO
+	          , '후열요청'
+	          , B.CR_EDITOR
+	          , A.CR_TEAM RECVUSER
+	          , C.CM_USERNAME
+	          , B.CR_PASSCD
+	      FROM  CMR9900 A
+	          , CMR1000 B
+	          , CMM0040 C
+	     WHERE  A.CR_QRYCD = '04'
+           AND  A.CR_ACPTNO = B.CR_ACPTNO
+	       AND  A.CR_LOCAT <> '00'
+	       AND  A.CR_STATUS = '9'
+	       AND  A.CR_CONGBN = '2'
+           AND  A.CR_SGNGBN = '201'
+	       AND  B.CR_STATUS <> '3'
+	       AND  B.CR_PRCDATE IS NOT NULL
+	       AND  B.CR_EDITOR = C.CM_USERID
+           AND B.CR_ACPTNO IN (SELECT DISTINCT X.CR_ACPTNO 
+                                  FROM CMR1000 X,CMR9900 Y
+                                 WHERE X.CR_QRYCD='04'
+                                   AND X.CR_STATUS<>'3'
+                                   AND X.CR_PRCDATE IS NOT NULL
+                                   AND X.CR_ACPTNO=Y.CR_ACPTNO
+                                   AND Y.CR_LOCAT<>'00'
+                                   AND Y.CR_CONGBN='4'
+                                   AND Y.CR_STATUS='0')
+	     GROUP BY B.CR_ACPTNO,B.CR_EDITOR,A.CR_TEAM,C.CM_USERNAME,B.CR_PASSCD         
+	     UNION ALL
+	    SELECT /*+ LEADING(B) USE_NL(A C) */
+	            B.CR_ACPTNO ACPTNO
+	          , '컴파일오류'
+	          , B.CR_EDITOR
+	          , A.CR_TEAM RECVUSER
+	          , C.CM_USERNAME
+	          , B.CR_PASSCD
+	      FROM  CMR9900 A
+	          , CMR1000 B
+	          , CMM0040 C
+	     WHERE  B.CR_QRYCD = '04'
+           AND  B.CR_STATUS = '0'
+           AND  B.CR_ACPTNO = A.CR_ACPTNO
+	       AND  A.CR_LOCAT <> '00'
+	       AND  A.CR_TEAMCD = '3'
+	       AND  B.CR_EDITOR = C.CM_USERID
+           AND  EXISTS (SELECT /*+ NO_UNNEST */  1	       
+						  FROM CMR1010 Y,CMR9900 Z                         
+						 WHERE Y.CR_ACPTNO=Z.CR_ACPTNO                     
+						   AND Z.CR_TEAMCD='1'                             
+						   AND Z.CR_LOCAT='00'                             
+						   AND Z.CR_TEAM IN ('SYSCB','SYSED','SYSRC')      
+						   AND B.CR_ACPTNO=Y.CR_ACPTNO                     
+						   AND Y.CR_STATUS='0'                             
+						   AND NVL(Y.CR_PUTCODE,'0000')<>'0000')
+	     GROUP BY B.CR_ACPTNO,B.CR_EDITOR,A.CR_TEAM,C.CM_USERNAME,B.CR_PASSCD
+         UNION ALL
+	    SELECT  /*+ LEADING(B C) USE_NL(C) */
+	            B.CR_ACPTNO ACPTNO
+	          , '컴파일오류'
+	          , B.CR_EDITOR
+	          , B.CR_EDITOR RECVUSER
+	          , C.CM_USERNAME
+	          , B.CR_PASSCD
+	      FROM  CMR1000 B
+	          , CMM0040 C
+	     WHERE  B.CR_QRYCD = '04'
+           AND  B.CR_STATUS = '0'
+           AND  B.CR_PRCDATE IS NULL
+	       AND  B.CR_EDITOR = C.CM_USERID    
+           AND  EXISTS (SELECT /*+ UNNEST NL_SJ */ 1 	       
+						  FROM CMR1010 Y,CMR9900 Z                      
+						 WHERE Y.CR_ACPTNO=Z.CR_ACPTNO                  
+						   AND Z.CR_TEAMCD='1'                          
+						   AND Z.CR_LOCAT='00'                          
+						   AND Z.CR_TEAM IN ('SYSCB','SYSED','SYSRC')   
+						   AND B.CR_ACPTNO=Y.CR_ACPTNO                  
+						   AND Y.CR_STATUS='0'                          
+						   AND NVL(Y.CR_PUTCODE,'0000')<>'0000')       
+	     ORDER BY RECVUSER,ACPTNO;
+
+	if (sqlca.sqlcode != 0) {
+		printf("ORACLE SELECT ERROR!! (%s)\n", sqlca.sqlerrm.sqlerrmc);
+		EXEC SQL ROLLBACK WORK RELEASE;
+		return 1;
+	}
+
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (Result File)                                 */
+    /*-----------------------------------------------------------*/
+    if ((SrcPtr = fopen(szFileNM, "w")) == (FILE *) NULL) {
+    	printf("FILE OPEN ERROR = %s\n", szFileNM);
+        return 1;
+    }
+
+	fprintf(SrcPtr, "%s|형상(서버등록)관리시스템 메일연동\n\n",szSendUser);
+
+	memset(szSvEditor, 0x00, sizeof(szSvEditor));
+	EXEC SQL OPEN SENDMAIL_LIST;
+	while (1) {
+		EXEC SQL FETCH  SENDMAIL_LIST
+			INTO  :szAcptNo
+				, :szMailCode
+				, :szEditor
+				, :szRecvUser
+				, :szUserNM
+				, :szPassCD  ;
+
+		if (sqlca.sqlcode == 1403) 	break;
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			break;
+		}
+
+		sprintf(szAcptNo  , "%s", trunc_char(szAcptNo  ));
+		sprintf(szMailCode, "%s", trunc_char(szMailCode));
+		sprintf(szEditor  , "%s", trunc_char(szEditor  ));
+		sprintf(szRecvUser, "%s", trunc_char(szRecvUser));
+		sprintf(szUserNM  , "%s", trunc_char(szUserNM  ));
+		sprintf(szPassCD  , "%s", trunc_char(szPassCD  ));
+		
+		if (strcmp(szSvRecvUser, szRecvUser) != 0) {
+			if (strlen(szSvRecvUser) > 0) {
+				fprintf(SrcPtr, "</table>\n\n<br><br>\n");
+				fprintf(SrcPtr, "<table  cellSpacing=0 cellPadding=0 border=0>\n");
+				fprintf(SrcPtr, "<tr>\n");
+				fprintf(SrcPtr, "   <td style=\"color: #605F5F; font-size: 12pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">");
+				fprintf(SrcPtr, "     <font color=#6699FF>★</font>&nbsp; 본 개인우편은 형상(서버등록)관리시스템에서 일일 1회(06시)자동으로 전송됩니다.\n"); 
+				fprintf(SrcPtr, "      <br><br>");
+				fprintf(SrcPtr, "     <font color=#6699FF>★</font>&nbsp; 문의 : 품질관리팀(☎3747,3748) \n");  
+		        fprintf(SrcPtr, "    </td>\n");
+		        fprintf(SrcPtr, "  </tr>\n");
+				fprintf(SrcPtr, "</table>\n\n\n");
+			}
+			nRowCnt = 0;
+			sprintf(szSvRecvUser, "%s", szRecvUser);
+		}
+
+		if (nRowCnt++ == 0) {			
+			fprintf(SrcPtr, "\n[TITLE]\n후열결재내역 및 Compile오류를 형상(서버등록)관리시스템에서 확인하시기 바랍니다.\n\n");
+			fprintf(SrcPtr, "[FROM]\n%s\n\n", szSendUser);
+			fprintf(SrcPtr, "[TO]\n%s\n\n\n", szRecvUser);
+			
+			fprintf(SrcPtr, "\n[CONTENT]\n<br><br>\n");
+			fprintf(SrcPtr, "<table  cellSpacing=0 cellPadding=0 border=0>\n");
+			fprintf(SrcPtr, "  <tr>\n");
+			fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 12pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">");
+			fprintf(SrcPtr,"         <font color=#6699FF>★</font>&nbsp; 후열결재내역 및 Compile오류를 형상(서버등록)관리시스템에서 확인하시기 바랍니다.<br><br>\n");
+            fprintf(SrcPtr, "        <font color=#6699FF>★</font>&nbsp; 컴파일 오류에 대해서는 해당 신청건의 팀내 모든 결재자에게 발송됩니다. (QA,감사 등 제외)\n");
+            fprintf(SrcPtr, "    </td>\n");
+            fprintf(SrcPtr, "  </tr>\n");
+			fprintf(SrcPtr, "</table><br>\n");
+			fprintf(SrcPtr, "<table cellSpacing=0 cellPadding=0 border=0>\n");
+			fprintf(SrcPtr, "  <tr> \n ");
+			fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 12pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\"><font color=#6699FF>★</font> 확인대상목록&nbsp&nbsp&nbsp (조회기준일 :  %s 06시)\n", szBaseDt);
+			fprintf(SrcPtr, "    		</td>\n");
+			fprintf(SrcPtr, "  </tr> \n");
+			fprintf(SrcPtr, "</table>\n");
+			fprintf(SrcPtr, "<table style=\"background-color:#BCC2C8\" width=\"80%%\" cellpadding=2 cellspacing=1 >\n");
+			fprintf(SrcPtr, "   <tr style=\"background-color:#779CC2; height:3px; font-size: 9pt;\" >\n");
+			fprintf(SrcPtr, "       <td colspan=4>\n");
+			fprintf(SrcPtr, "       </td>\n ");
+			fprintf(SrcPtr, "   </tr>\n ");
+			fprintf(SrcPtr,"    <tr style=\"font-family: Arial, 돋음;background-color:#eeeeee; height:22; text-align: center;font-weight: bold;font-size: 9pt;\">");
+			fprintf(SrcPtr,"		<td width=\"15%%\"><p ALIGN = \"CENTER\">신청번호</td>");
+			fprintf(SrcPtr,"		<td width=\"15%%\"><p ALIGN = \"CENTER\">신청구분</td>");
+			fprintf(SrcPtr,"		<td width=\"15%%\"><p ALIGN = \"CENTER\">신청자</td>");
+			fprintf(SrcPtr,"		<td width=\"55%%\"><p ALIGN = \"CENTER\">요청사유</td>");
+			fprintf(SrcPtr, "   </tr>\n ");
+		}
+        sprintf(acptno_1, "%s", mid_char(szAcptNo, 1, 4));
+		sprintf(acptno_2, "%s", mid_char(szAcptNo, 5, 2));
+		sprintf(acptno_3, "%s", mid_char(szAcptNo, 7, 6));
+		
+		fprintf(SrcPtr, "<tr style=\"background-color: #ffffff; height:22;font-size: 9pt;\" >\n");
+		fprintf(SrcPtr, "<td><p ALIGN = \"CENTER\">%s-%s-%s</td>\n",acptno_1,acptno_2,acptno_3);
+		fprintf(SrcPtr, "<td><p ALIGN = \"CENTER\">%s</td>\n",szMailCode);
+		fprintf(SrcPtr, "<td><p ALIGN = \"CENTER\">%s</td>\n",szUserNM);
+		fprintf(SrcPtr, "<td>&nbsp;%s</td>\n",szPassCD);		
+		fprintf(SrcPtr, "</tr>\n   ");
+
+	}
+	
+   	EXEC SQL close SENDMAIL_LIST;
+			
+
+	if (strlen(szSvRecvUser) > 0) {
+		fprintf(SrcPtr, "</table>\n\n<br><br>\n");
+		fprintf(SrcPtr, "<table  cellSpacing=0 cellPadding=0 border=0>\n");
+		fprintf(SrcPtr, "<tr>\n");
+		fprintf(SrcPtr, "   <td style=\"color: #605F5F; font-size: 12pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\"> \n");
+		fprintf(SrcPtr,"       <font color=#6699FF>★</font>&nbsp; 본 개인우편은 형상(서버등록)관리시스템에서 일일 1회(06시)자동으로 전송됩니다.\n"); 
+		fprintf(SrcPtr, "      <br><br>");
+		fprintf(SrcPtr, "     <font color=#6699FF>★</font>&nbsp; 문의 : 품질관리팀(☎3747,3748) \n");  
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr>\n");
+		fprintf(SrcPtr, "</table>\n");
+		/*
+		Server_Cmd_JOB(&CmdInfo);
+		remove (szFileNM);
+		*/
+	}
+	fclose (SrcPtr);
+	EXEC SQL ROLLBACK WORK RELEASE;
+	return 0;
+}
+/*---------------------------------------------------------------*/
+/*		파일대사 미조치건에 대한 메일발송                        */
+/*---------------------------------------------------------------*/
+int    Diff_Mail_Make () 
+{
+	
+
+	EXEC SQL DECLARE DIFFMAIL_LIST CURSOR FOR
+		SELECT  A.CR_CONUSR
+	      FROM  CMR9910 A
+	     WHERE  A.CR_STATUS='0'
+           AND  A.CR_ACPTNO='MAILFILEDIFF'
+         GROUP BY A.CR_CONUSR
+         ORDER BY A.CR_CONUSR;
+
+	if (sqlca.sqlcode != 0) {
+		printf("ORACLE SELECT ERROR!! (%s)\n", sqlca.sqlerrm.sqlerrmc);
+		EXEC SQL ROLLBACK WORK RELEASE;
+		return 1;
+	}
+	
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (Result File)                                 */
+    /*-----------------------------------------------------------*/
+    if ((SrcPtr = fopen(szFileNM, "w")) == (FILE *) NULL) {
+    	printf("FILE OPEN ERROR = %s\n", szFileNM);
+        return 1;
+    }
+
+	fprintf(SrcPtr, "%s|형상(서버등록)관리시스템 메일연동 [파일대사] \n\n",szSendUser);
+
+	EXEC SQL OPEN DIFFMAIL_LIST;
+	while (1) {
+		EXEC SQL FETCH  DIFFMAIL_LIST
+			INTO  :szRecvUser;
+
+		if (sqlca.sqlcode == 1403) 	break;
+
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			break;
+		}
+
+		sprintf(szRecvUser, "%s", trunc_char(szRecvUser));
+			
+		fprintf(SrcPtr, "\n[TITLE]\n형상(서버등록)관리시스템 파일대사결과 정비 요청 건이 있습니다.\n\n");
+		fprintf(SrcPtr, "[FROM]\n%s\n\n", szSendUser);
+		fprintf(SrcPtr, "[TO]\n%s\n\n\n", szRecvUser);
+		
+		fprintf(SrcPtr, "\n[CONTENT]\n<br><br>\n");
+		fprintf(SrcPtr, "<table  cellSpacing=0 cellPadding=0 border=0>\n");
+		fprintf(SrcPtr, "  <tr>\n");
+		fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 11pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">&nbsp; 안녕하십니까? 형상(서버등록)관리시스템 담당자입니다.\n");
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr>\n");
+		fprintf(SrcPtr, "  <tr>\n");
+		fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 11pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">&nbsp; 형상(서버등록)관리시스템 상에서 파일대사 정비 요청 건이 있으니\n");
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr>\n");
+		fprintf(SrcPtr, "  <tr>\n");
+		fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 11pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">&nbsp; 프로그램담당자께서는 조치를 부탁드립니다.\n");
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr>\n");
+		fprintf(SrcPtr, "  <tr>\n");
+		fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 11pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">&nbsp; (3일이상 미조치 시 프로그램 불일치 정리계획서 제출) \n");
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr>\n");
+		fprintf(SrcPtr, "  <tr>\n");
+		fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 11pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">&nbsp; 또한 형상(서버등록)관리시스템에서 파일대사 불일치 사유를 등록하여 관리하고 있으니 \n");
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr>\n");
+		fprintf(SrcPtr, "  <tr>\n");
+		fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 11pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">&nbsp; 형상(서버등록)관리시스템에 접속하여 보고서>파일대사이력관리 화면에서 \n");
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr>\n");
+		fprintf(SrcPtr, "  <tr>\n");
+		fprintf(SrcPtr, "    <td style=\"color: #605F5F; font-size: 11pt;font-family: Arial, 돋음;height: 33px; font-weight: bold;\">&nbsp; 발생사유를 등록하여 주시기 바랍니다 .\n");
+        fprintf(SrcPtr, "    </td>\n");
+        fprintf(SrcPtr, "  </tr><br>\n");
+		fprintf(SrcPtr, "</table><br><br><br>\n");
+		fprintf(SrcPtr, "<A href=\"%s\">&nbsp&nbsp▶&nbsp형상(서버등록)관리 시스템으로 가기</A>\n\n\n",szURL);
+	}
+   	EXEC SQL close DIFFMAIL_LIST;
+	
+	fclose (SrcPtr);
+	return 0;
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

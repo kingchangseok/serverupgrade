@@ -1,0 +1,192 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_chkdoc.pc                               │
+ ├──────┼───────────────────────┤
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2008. 01. 19                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE SQLCA;
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+char gszLogFile[50];	/*Log File Name*/
+char gszLogPath[100];	/*Log File Path*/
+char gszLogMsg[512];	/*Log Message  */
+char gszTempPath[100];	/*Temp Direcotry*/
+
+
+
+
+
+
+int		main (int argc, char **argv, char **envp)
+{
+	char	szAcptNo[21];
+	char	szSysCD[6];
+	char	szRsrcCD[3];
+	char	szDsnCD[8];
+	char	szRsrcName[512];
+	int		szSerNo;
+	char	szBaseNo[21];
+	char	szReqCD[3];
+	char	szSysGB[2];
+	char	szEditor[512];
+	char	szItemId[13];
+	char	szGbnCd[2];
+	
+	char	szCommand[5000];
+	
+	int		nRet;
+	int		ncnt;
+	
+	if (argc < 3) {
+        printf ("Usage : %s <ACPTNO> <GBNCD [B/A] > \n", argv[0]);
+        exit (0);
+    }
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");	
+
+
+    memset(szAcptNo    , 0x00, sizeof(szAcptNo   ));
+	sprintf(szAcptNo   , "%s", argv[1]);    
+	sprintf(szGbnCd    , "%s", argv[2]);    
+
+	sprintf(szCommand,"procck2 ecams_chkdoc %s",szAcptNo); 
+	ncnt = system(szCommand) / 256;
+	if (ncnt > 1) {
+		printf("procck2 check error [%d]",ncnt);
+		exit (1);
+	}
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE){
+		/*LOG*/sprintf(gszLogMsg,"[%s] 사전검증 DB Connect Error\n",szAcptNo);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+
+
+	/*LOG*/sprintf(gszLogMsg,"[%s] 사전검증 처리 시작\n",szAcptNo);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+	    
+
+	memset(gszTempPath,0x00,sizeof(gszTempPath));
+	SetTempDir("99",gszTempPath);
+	
+	
+	EXEC SQL  declare CHKDOC_CUR cursor for
+		SELECT	DISTINCT
+				A.CR_SYSCD,
+				A.CR_RSRCCD,
+				A.CR_DSNCD,
+				A.CR_RSRCNAME,
+				A.CR_SERNO,
+				nvl(A.CR_BASENO,A.CR_ACPTNO),
+				A.CR_QRYCD,
+				A.CR_EDITOR, 
+				A.CR_ITEMID 
+		FROM	CMM0501 D,CMM0500 C,CMR1010 A,CMR1000 B
+		WHERE	A.CR_ACPTNO = :szAcptNo
+		AND		A.CR_ACPTNO = B.CR_ACPTNO
+		AND		A.CR_STATUS<>'3'
+		AND     A.CR_QRYCD IN ('03','04')
+		AND     B.CR_QRYCD = '04'
+		AND		A.CR_SYSCD = D.CM_SYSCD
+		AND		A.CR_RSRCCD= D.CM_RSRCCD
+		AND     D.CM_DOCCD=C.CM_DOCCD
+		AND     C.CM_WRTCD IN ('C','T')
+		AND     C.CM_DOCCD=DECODE(:szGbnCd,'A','00004',C.CM_DOCCD);
+		
+			
+	EXEC SQL open  CHKDOC_CUR;
+
+
+    while (1) 
+	{
+		EXEC SQL fetch CHKDOC_CUR into  :szSysCD, :szRsrcCD, :szDsnCD, :szRsrcName, :szSerNo, :szBaseNo, :szReqCD, 
+										:szEditor, :szItemId;
+
+		if (sqlca.sqlcode == 1403)	break;		
+
+		NotUseDataTruncate (szSysCD     , 0x20);
+		NotUseDataTruncate (szRsrcCD    , 0x20);
+		NotUseDataTruncate (szDsnCD     , 0x20);
+		NotUseDataTruncate (szRsrcName  , 0x20);
+		NotUseDataTruncate (szBaseNo    , 0x20);				
+		NotUseDataTruncate (szReqCD     , 0x20);
+		NotUseDataTruncate (szEditor   , 0x20);
+		NotUseDataTruncate (szItemId   , 0x20);
+		
+						 
+		while (1) {
+			nRet = 0;
+			sprintf (szCommand, "procck2 ecams_chkdoc_sub %s",szAcptNo);
+			nRet = system(szCommand) / 256;	
+
+			if (nRet < 5) break;
+		}
+								 
+		memset(szCommand,0x00,sizeof(szCommand));
+		
+		sprintf(szCommand,"./ecams_chkdoc_sub \"%s\" \"%s\" \"%s\" \"%s\" \"%s\" \"%d\" \"%s\" \"%s\" \"%s\" \"%s\" \"%s\" & "
+						 , szAcptNo, szSysCD, szRsrcCD, szDsnCD, szRsrcName, szSerNo, szBaseNo, szReqCD, szEditor, szItemId, szGbnCd);		
+		system(szCommand);
+		printf("%s\n", szCommand);
+    }
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;
+    EXEC SQL CLOSE CHKDOC_CUR;	
+	
+	
+	do{
+		sleep(3);
+		sprintf (szCommand, "procck2 %s %s", "ecams_chkdoc_sub", szAcptNo);
+		nRet = system (szCommand) / 256;
+	}while(nRet > 0);
+		
+		
+	/*LOG*/sprintf(gszLogMsg,"[%s] 사전검증 처리 종료\n",szAcptNo);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+	exit(0);
+		
+}
+
+
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

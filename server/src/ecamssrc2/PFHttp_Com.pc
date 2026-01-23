@@ -1,0 +1,455 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ PFHttp_Com.pc                                │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ PFHttpCom Class Call                         │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2012. 04. 23                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include    <ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+char   	**gEnvp;                    /* Parameter 죵료용 Pointer  */
+extern    int    errno;             /* 시스템 오류코드           */
+
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	Make_FileList	(char *, char *);
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : ProFrame_Call                                    */
+/*	Action    : PFHttpCom Class Call                             */
+/*	Parameter :	pCODE       : 구분                               */
+/*	            pSysCD      : 시스템코드                         */
+/*	            szRsrcType  : 리소스타입	                     */
+/*	            szPhyName   : 물리명                             */
+/*	            szOutName   : 리스트파일                         */
+/*	Return    : 처리결과                                         */
+/*---------------------------------------------------------------*/
+int		ProFrame_Call	( char *pCODE
+                        , char *pSysCD
+						, char *pRsrcType
+						, char *pPhyName
+						, char *pOutName
+						)
+{
+char 	szCODE                     [256];
+char	szSysCD			       [dfSysCD];
+char 	szServerIP             [dfSvrIP];
+int  	szPortNo                        ;
+char 	szUserID              [dfEditor];
+char 	szPassWD                   [256];
+int		retval                          ;
+char	gSysCmd		              [2048];
+char 	szOutName           [dfFullPath];
+char 	szOutName1          [dfFullPath];
+char	szRsrcType	        [dfRsrcType];
+char	szPhyName	        [dfPhysName];
+char	szTmpPath	             [dfDir];
+char	szResultFile        [dfFullPath];
+char	szReturnFile        [dfFullPath];
+char	szErrorFile         [dfFullPath];
+char	szListName          [dfFullPath];
+char	szListFile          [dfFullPath];
+char	szTempFile	        [dfFullPath];
+char 	returnmessage             [2048];
+int		ret                             ;
+int		nRst                            ;
+char	*szKeys[5]                      ;
+int		Index_key=0                     ;
+char	*toktmp                         ;
+char	*Readbuf                        ;
+int		returnval=0                     ;
+CMD_INFO	  CmdInfo                   ;
+FILE    *SrcPtr                         ;
+FILE    *DstPtr                         ;
+int		AgentPort                       ;                
+char	*dummy                          ;
+long	nFileSize                       ;
+char	returnvalStr              [1024];
+
+
+	/*-----------------------------------------------------------*/
+	/*		파리미터 SET                                         */
+	/*-----------------------------------------------------------*/
+	sprintf(szCODE       , "%s", pCODE     );
+	sprintf(szSysCD      , "%s", pSysCD    );
+	sprintf(szRsrcType   , "%s", pRsrcType );
+	sprintf(szPhyName    , "%s", pPhyName  );
+	sprintf(szOutName    , "%s", pOutName  );
+
+	/*-----------------------------------------------------------*/
+	/*		파리미터 SET                                         */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_SVRIP,
+		        CM_PORT,
+		        CM_SVRUSR,
+		        CM_SVRPASS
+		INTO    :szServerIP,
+		        :szPortNo,
+		        :szUserID,
+		        :szPassWD        
+		FROM CMM0039
+		WHERE CM_SYSCD = :szSysCD
+		AND   CM_DIRCD = '01';
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr, "시스템코드 오류 : [%s] [%d] [%s]\n"
+		              , szSysCD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return (1);
+	}
+	
+
+	NotUseDataTruncate (szServerIP, 0x20);
+	NotUseDataTruncate (szUserID  , 0x20);
+	NotUseDataTruncate (szPassWD  , 0x20);	
+	
+	EXEC SQL
+		SELECT  DISTINCT
+		        CM_PORTNO
+		  INTO  :AgentPort
+		  FROM  CMM0031
+		 WHERE  CM_SYSCD = :szSysCD
+		   AND  CM_SVRCD = '01'
+		   AND	CM_SVRIP = :szServerIP
+		   AND  ROWNUM = 1;
+
+	if (sqlca.sqlcode != 0){
+		AgentPort = dfeCAMSFepPort;
+	}
+
+
+	NotUseDataTruncate (szServerIP, 0x20);
+	NotUseDataTruncate (szUserID  , 0x20);
+	NotUseDataTruncate (szPassWD  , 0x20);
+
+	SetTempDir("99", szTmpPath);
+	if (memcmp((char *)right_char(szTmpPath, 1), "/", 1) != 0)
+		sprintf(szTmpPath, "%s/", szTmpPath);
+
+	sprintf(szOutName1, "%s", szOutName);
+	ret = Right_Char_Check(szOutName, '/');
+	if (ret > 0) {
+		sprintf(szOutName1, "%s", right_char(szOutName, strlen(szOutName) - ret));
+	}
+	
+	sprintf(szListFile  , "%s.list", szOutName );
+	sprintf(szListName  , "%s.list", szOutName1);
+	
+	sprintf(szResultFile, "%s.tmp" , szOutName1);
+	sprintf(szReturnFile, "%s"     , szOutName );
+	sprintf(szErrorFile , "%s.err" , szOutName );
+
+	/*-----------------------------------------------------------*/
+	/*		구분 체크                                            */
+	/*-----------------------------------------------------------*/
+	if (strcmp(szCODE, "REQUEST_PUBLISH") != 0 &&
+		strcmp(szCODE, "PUBLISH_APPROVAL") != 0 ) {
+		fprintf(stderr, "구분오류 : [%s]\n", szCODE);
+		return (9);
+	}
+            
+
+	sprintf(gSysCmd, "java PFHttpCom \"%s\" \"%s\" %d \"%s\" \"%s\" \"%s\" \"%s\" \"%s\" 1>/dev/null 2>%s"
+		           , szCODE
+		           , szServerIP
+		           , szPortNo
+		           , szUserID
+		           , szPassWD
+		           , szPhyName
+		           , szRsrcType
+		           , szResultFile
+		           , szErrorFile
+		           );
+
+	printf("CMD = [%s]\n", gSysCmd);
+	
+	retval = system(gSysCmd) / 256;
+
+	if (retval != 0) {
+		fprintf(stderr, "CALL : [%s]\n", gSysCmd);
+		fprintf(stderr, "PFHttpCom(프로프레임 인터페이스) CALL ERROR \n");
+		return (1);
+	}
+
+	if (FileSizeInf(szErrorFile) > 0) {
+		fprintf(stderr, "PFHttpCom(프로프레임 인터페이스) CALL ERROR \n");
+		return (1);
+	}
+
+	/*-----------------------------------------------------------*/
+	/*		처리구분별 처리결과 체크                             */
+	/*-----------------------------------------------------------*/
+	nFileSize = FileSizeInf(szResultFile) + 1;
+	dummy = (char *)malloc(nFileSize);
+	memset(dummy, 0x00, nFileSize);
+
+    if ((SrcPtr = fopen(szResultFile, "r")) == (FILE *) NULL) {
+		fprintf(stderr, "처리결과파일 OPEN 오류 [%s]\n", szResultFile);
+		return (8);
+	}
+
+	while (fgets(dummy, 1024, SrcPtr) != (char *) NULL) {
+		strcpy(dummy,(char *)rep_char(dummy,"\n",""));
+		strcpy(dummy,(char *)rep_char(dummy,"\r\n",""));
+		strcpy(dummy,(char *)trunc_char(dummy));
+		
+		Readbuf = (char *)malloc(sizeof(dummy));
+		memset(Readbuf,0x00,sizeof(dummy));
+		strcpy(Readbuf,dummy);
+					
+		Index_key = 0;
+		while(1) {
+			if (Index_key == 0) {
+				szKeys[Index_key] = strtok_r(Readbuf, ":", &toktmp);
+				returnval= atoi(szKeys[0]);
+			}
+			else
+				szKeys[Index_key] = strtok_r(NULL, (char *)":", &toktmp);
+	
+			if (szKeys[Index_key] == NULL)
+				break;
+
+			if (returnval != 0 && Index_key == 3)	break;
+			
+			Index_key++;
+		}
+	
+		if (Index_key == 0 || Index_key<3){
+			fprintf(stderr, "처리결과파일 분석 실패 dummy=[%s] \n",dummy);
+			returnval = -1;
+			free(Readbuf);
+			continue;
+		}
+		returnval=-1;
+		memset(returnvalStr,0x00,sizeof(returnvalStr));
+		memset(returnmessage,0x00,sizeof(returnmessage));
+		
+		returnval= atoi(szKeys[0]);
+		strcpy(returnvalStr,szKeys[1]);
+		strcpy(returnmessage,szKeys[2]);						
+		free(Readbuf);
+	}
+		
+	fclose (SrcPtr);
+	
+	if (access(szResultFile, F_OK) >= 0)
+		remove(szResultFile);
+
+	if (returnval != 0) {
+		if ((SrcPtr = fopen(szErrorFile,"w")) == NULL) {
+			printf("ERROR 파일 생성 실패!\n");
+			return (1);
+		}
+		fprintf(SrcPtr,"%s:\n",dummy);
+		fclose(SrcPtr);		
+	}
+		
+	if (returnval != 0 || 
+	    strcmp(szCODE, "REQUEST_PUBLISH") == 0 ||
+	    strcmp(szCODE, "LIST") == 0) {
+		return returnval;
+	}
+	
+	sprintf(returnmessage,"%s", (char *)trunc_char(returnmessage));
+	
+	InitCmdInfo(&CmdInfo);
+	
+	CmdInfo.nPort = AgentPort;
+	strcpy(CmdInfo.szServerIP, szServerIP);
+	strcpy(CmdInfo.szJobGub,"S");		
+	sprintf(CmdInfo.szCommand,"ls -lLR %s | awk '{print $1,\" \",$9}' > %s", returnmessage, szListName);
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+		
+	/*-----------------------------------------------------------*/
+	/* 	생성 파일 GET                                            */
+	/*-----------------------------------------------------------*/
+	strcpy(CmdInfo.szJobGub,"G");
+	sprintf(CmdInfo.szLocal ,"%s", szListFile);
+	sprintf(CmdInfo.szRemote,"%s", szListName);
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	
+	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		return (1);
+	}
+	
+	/*-----------------------------------------------------------*/
+	/* 	서버에 생성 파일 삭제                                    */
+	/*-----------------------------------------------------------*/
+	strcpy(CmdInfo.szJobGub,"S");
+	sprintf(CmdInfo.szCommand,"rm -rf %s",szListName);
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	
+	
+	sprintf(szTempFile,"%s.tmp",szListFile);
+	if ((SrcPtr = fopen(szTempFile,"w")) == NULL) {
+		printf("임시파일 생성 실패!\n");
+		return (1);
+	}
+
+	fprintf(SrcPtr,"%s:\n",returnmessage);
+	fclose(SrcPtr);
+	
+	sprintf(gSysCmd,"cat %s >> %s",szListFile, szTempFile);
+	nRst = system(gSysCmd);
+	if (nRst != 0) {
+		fprintf(stderr, "파일리스트에 경로 추가 실패!\n");
+		return (1);
+	}
+	else {	
+	    sprintf(gSysCmd,"mv %s %s", szTempFile,szListFile);
+	    nRst = system(gSysCmd);
+	}
+		
+	if (Make_FileList(szListFile,szReturnFile) != 0) {
+		return 1;
+	}
+	
+	sprintf(szListName,"%s.list", szOutName);
+	sprintf(szListFile,"%s%s"   , szTmpPath, szListName);
+	remove (szListFile);
+	
+	return 0;
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Make_FileList                                    */
+/*	Action    : 체크인대상 파일목록 작성                         */
+/*	Parameter :	pListFileName   : 목록파일                       */
+/*	            preturnFileName : 결과파일                       */
+/*	Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int		Make_FileList	( char *pListFileName
+						, char *preturnFileName
+						)
+{
+FILE 	*fptr1                          ;
+FILE 	*fptr2                          ;
+int 	ncnt                            ;
+int		nRet1                           ;
+char 	DirName                  [dfDir];
+char 	DirName1                 [dfDir];
+char 	dummy               [dfFullPath];
+char 	RsrcName                [dfFile];
+
+
+
+
+    /*-----------------------------------------------------------*/
+    /*   Make File Name Find                                     */
+    /*-----------------------------------------------------------*/    
+    if ((fptr1 = fopen(pListFileName,"r")) == (FILE *) NULL) {
+	    printf("FILE OPEN ERROR!! \n");
+        return (1);
+    }
+    
+    /*-----------------------------------------------------------*/
+    /*   Make File Name Find                                     */
+    /*-----------------------------------------------------------*/    
+    if ((fptr2 = fopen(preturnFileName,"w")) == (FILE *) NULL) {
+	    printf("FILE OPEN ERROR!! \n");
+        return (1);
+    }    
+    
+    
+    memset(DirName, 0x00, sizeof(DirName));
+    memset(dummy, 0x00, sizeof(dummy));
+
+	ncnt = 0;
+
+    while (fgets(dummy, 256, fptr1) != (char *) NULL) {
+        /*-------------------------------------------------------*/
+    	/* Return Valure Truncate                                */
+        /*-------------------------------------------------------*/
+        strcpy(dummy,(char *)rep_char(dummy,"\n",""));
+        strcpy(dummy,(char *)rep_char(dummy,"\r\n",""));
+        strcpy(dummy,(char *)trunc_char(dummy));
+
+        if (dummy[0] == '/') {
+        	memset(DirName, 0x00, sizeof(DirName));
+        	sprintf(DirName, "%s", (char *)left_char(dummy, strlen(dummy)-1));
+        	memset(dummy, 0x00, sizeof(dummy));
+        	continue;
+        }
+
+        if (memcmp(dummy, "-", 1) != 0) {
+			memset(dummy, 0x00, sizeof(dummy));
+			continue;
+		}
+
+        if (strlen(DirName) == 0) {
+			memset(dummy, 0x00, sizeof(dummy));
+			continue;
+		}
+
+		strcpy(dummy,(char *)trunc_char(dummy));
+		nRet1 = Char_Check(dummy, " ");
+
+
+		if (nRet1 >= 0) {
+  			strcpy(dummy, (char *)right_char(dummy, strlen(dummy) - nRet1 - 1));
+		}
+		else{
+			memset(dummy, 0x00, sizeof(dummy));
+			continue;
+		}
+
+        strcpy(dummy,(char *)rep_char(dummy,"*",""));
+        strcpy(dummy,(char *)trunc_char(dummy));
+        memset(RsrcName, 0x00, sizeof(RsrcName));
+        strcpy(RsrcName, dummy);
+        
+        nRet1 = Char_Check(DirName, "/publish/");
+        if (nRet1 < 0)	continue;
+        	
+        sprintf(DirName1, "%s", (char *)right_char(DirName, strlen(DirName) - nRet1 - 9));
+        
+        printf(">> [%s] [%s] [%s]\n", DirName, DirName1, RsrcName);
+        
+        if (Char_Check(DirName1, "/") < 0) {
+        	if (memcmp((char *)right_char(RsrcName, 5), ".init", 5) == 0)   	continue;
+        	if (memcmp((char *)right_char(RsrcName, 4), ".dat" , 4) == 0)   	continue;
+        }
+        fprintf(fptr2,"%s/%s\r\n",DirName, RsrcName);
+        fflush(fptr2);
+        
+        ncnt++;
+        memset(dummy, 0x00, sizeof(dummy));        
+    }
+    fclose (fptr1);
+    fclose (fptr2);
+
+	if (ncnt == 0)
+		return (1);
+	else
+    	return (0);
+    	
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

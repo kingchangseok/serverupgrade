@@ -1,0 +1,212 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_effsend.pc                             │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 영향분석으로 최종소스 이행 처리 MAIN         │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 10. 02                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		Structure for VARRAW                                     */
+/*---------------------------------------------------------------*/
+typedef struct
+{
+	short len;
+	char  arr[100];
+} vr;
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*      계정/정보계 기존 버전자료 이행 처리  M A I N             */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char	szItemID              [dfItemID];
+char	szSysCmd            [dfFullPath];
+char	szSysCD                [dfSysCD];
+char	szRsrcCD                [dfSysCD];
+char	szSysDate                  [8+1];
+char	szAcptNo                  [16+1];
+int 	retval                          ;
+int   nCnt =0;
+int 	szSeqNo                         ;
+CMD_INFO	CmdInfo                     ;
+
+	
+	if (argc < 2) {
+		fprintf(stderr, "Usage : %s <시스템> \n", argv[0]);
+		exit (1);
+	}
+
+	
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,"_drsend.log");
+  sprintf(gszLogPath,"%s/",getenv("LOGDIR"));
+
+
+	memset(szSysCD, 0x00, sizeof(szSysCD));
+	memset(szRsrcCD, 0x00, sizeof(szRsrcCD));
+	memset(szSysDate, 0x00, sizeof(szSysDate));
+	memset(szAcptNo , 0x00, sizeof(szAcptNo));
+	
+	sprintf(szSysCD, "%s", argv[1]);
+	NotUseDataTruncate (szSysCD, 0x20);
+
+
+	sprintf(gszLogMsg,"DR SERVER SEND START : [%s] [%s]", szSysCD, sqlca.sqlerrm.sqlerrmc);
+	eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		
+  
+  /*-----------------------------------------------------------*/
+  /*   Signal Define			                                 */
+  /*-----------------------------------------------------------*/
+  DefineSignal ();
+  /*-----------------------------------------------------------*/
+  /*   eCAMS  DB Server  Connect                               */
+  /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		fprintf(stderr, "DB 연결 않됨 \n");
+		exit(1);
+	}
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", gszTempPath);
+	NotUseDataTruncate(gszTempPath,0x20);
+	if (strlen(gszTempPath) == 0) {
+		strcpy(gszTempPath,"tmp/");
+	}
+	else {
+		if (cmp_right_char(gszTempPath, 1, "/") != 0)
+	       sprintf(gszTempPath,"%s%s", gszTempPath,"/");
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   소스백업 디렉토리                                       */
+    /*-----------------------------------------------------------*/
+	SetTempDir("93", gszBackPath);
+
+  if ( argc == 2 ) {
+    EXEC SQL
+      SELECT TO_CHAR(SYSDATE, 'YYYYMMDD')
+        INTO :szSysDate
+        FROM DUAL;
+        
+	} else 	if ( argc == 3 ) {
+	   sprintf(szSysDate, "%s", argv[2]);
+
+	}
+
+	NotUseDataTruncate(szSysDate,0x20);
+
+	sprintf(gszLogMsg,"DR SERVER SEND START : szSysCD=[%s] szSysDate=[%s]", szSysCD, szSysDate);
+	eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+	
+	/*-----------------------------------------------------------*/
+	/*	이행대상 목록 작성                                       */
+	/*-----------------------------------------------------------*/
+	EXEC SQL DECLARE IH_Rsrc CURSOR FOR
+    SELECT C.CR_ITEMID, C.CR_RSRCCD, MAX(C.CR_ACPTNO)
+      FROM  CMR1000 A, CMR9900 B, CMR1010 C, 	CMM0036 D
+     WHERE A.CR_SYSCD  = DECODE(:szSysCD, 'ALL', A.CR_SYSCD, :szSysCD)
+       AND A.CR_STATUS in ('8', '9')
+       AND A.CR_STATUS = B.CR_STATUS
+       AND A.CR_STATUS = C.CR_STATUS
+       AND A.CR_ACPTNO = B.CR_ACPTNO
+       AND A.CR_ACPTNO = C.CR_ACPTNO
+       AND B.CR_TEAM = 'SYSED'
+       AND B.CR_LOCAT = '00'
+       AND A.CR_QRYCD = '04'
+       AND A.CR_QRYCD = B.CR_QRYCD
+       AND C.CR_RSRCCD = D.CM_RSRCCD
+       AND A.CR_SYSCD = D.CM_SYSCD  
+       AND SUBSTR(D.CM_INFO, 11, 1) = '1'
+       AND C.CR_RSRCCD <> '02'
+/*     AND C.CR_RSRCCD NOT IN ('02', '07',  '24', '32', '33')*/
+       AND SUBSTR(TO_CHAR(A.CR_PRCDATE, 'YYYYMMDD'), 0, 8) = :szSysDate
+       GROUP BY C.CR_ITEMID, C.CR_RSRCCD;
+
+	EXEC SQL open  IH_Rsrc;
+    while (1) {
+		EXEC SQL fetch IH_Rsrc
+			INTO  :szItemID
+			   ,  :szRsrcCD
+			   ,  :szAcptNo;
+
+		NotUseDataTruncate (szItemID  , 0x20);
+		NotUseDataTruncate (szRsrcCD  , 0x20);
+		NotUseDataTruncate (szAcptNo  , 0x20);
+
+		if (sqlca.sqlcode == 1403)	break;
+			
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg,"IH_Rsrc DB FETCH ERROR : [%d] [%s]", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+		sprintf(szSysCmd, "%s", "procck ecams_drsend_sub");
+		while (1) {
+			retval = system(szSysCmd) / 256;
+			if (retval < 10)	break;
+			sleep(1);
+		}
+
+		if ( strncmp ( szRsrcCD, "23", 2 ) == 0 ||
+		     strncmp ( szRsrcCD, "40", 2 ) == 0) {
+		  szSeqNo = 2;
+		} else {
+		  szSeqNo = 1;   
+		}
+		
+		sprintf(szSysCmd, "ecams_drsend_sub %s %d %s &", szItemID, szSeqNo, szAcptNo);
+		retval = system(szSysCmd) / 256;
+    nCnt += 1;
+	}
+	EXEC SQL close IH_Rsrc;
+	sprintf(gszLogMsg,"ecams_drsend total Count [%d] ", nCnt);
+	eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+
+	printf ( "nCnt [%d]\n", nCnt);
+	EXEC SQL COMMIT WORK RELEASE;
+	exit (0);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

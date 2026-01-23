@@ -1,0 +1,436 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_ITSMInf.pc                            │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 처리완료된 건에 대하여 ITSM 연계하여         │
+ │            │ 상태 Update                                  │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2013. 02. 05                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+char	SysCmd                    [1024]; /* 시스템 명령문       */
+int 	nRet1                           ; /* Char Find Work      */
+
+char   **gEnvp                          ;
+char gszLogFile[50];	/*Log File Name*/
+char gszLogPath[100];	/*Log File Path*/
+char gszLogMsg[512];	/*Log Message  */
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       ITSM Interface    처리  M A I N                         */
+/*                                                               */
+/*   Parameter  :                                                */	
+/*    * [0] : output file path                                   */
+/*	  * [1] : http://10.211.28.101:9121/inInt/EMIT_HN_02.do => URL + I/F_ID  */
+/*	                                                                         */
+/*	                                                                         */
+/*	 *    I/F ID 02일때                                                      */
+/*	 *    [2] : SubSRNO                                                      */
+/*	 *    [3] : REQCD 변경상태                                               */
+/*	 *    [4] : 수행결과                                                     */
+/*	 *    [5] : 수행(배포)일시                                               */
+/*	 *    [6] : 결재자사번(List)                                             */
+/*	 *    [7] : 요청자(신청자)                                               */
+/*	 *    [8] : 요청일시(보내는시간) yyyymmddhh24mi                          */
+/*                                                                           */
+/*                                                                           */
+/*	 *    I/F ID 04일때                                                      */
+/*	 *    [2] : SR TITLE(신청사유 한글 15자이하로...)                        */
+/*	 *    [3] : 요청자사번                                                   */
+/*	 *    [4] : 등록자사번                                                   */
+/*	 *    [5] : 완료(배포)일자                                               */
+/*	 *    [6] : 영향도코드                                                   */
+/*	 *    [7] : 긴급코드                                                     */
+/*	 *    [8] : 결재자사번(List)                                             */
+/*	 *    [9] : 긴급유형                                                     */
+/*	 *    [10] : 긴급사유(신청사유)                                          */
+/*	 *    [11] : 요청일시(보내는시간) yyyymmddhh24mi                         */
+/*	 [I/F ID 02일때]                                                         */
+/*		java ITSMUtil 'EMIT_HN_02.log' 'http://10.211.28.101:9121/inInt/EMIT_HN_02.do' 'T1302040001_001' '30' '00' '201302041334' 'eCAMS' 'A08101304' '201302041334'                  */
+/*		java ITSMUtil 'EMIT_HN_02.log' 'http://10.211.28.101:9121/inInt/EMIT_HN_02.do' 'T1302040001_001' '50' '00' '201302041421' 'eCAMS' 'A08101304' '201302041421'                  */
+/*		[IF 결재완료일때]                                                                                                                                                             */
+/*		java ITSMUtil 'EMIT_HN_02.log' 'http://10.211.28.101:9121/inInt/EMIT_HN_02.do' 'T1302040001_001' '65' '00' '201302041742' 'A08101435' 'A08101304' '201302041742'              */
+/*		java ITSMUtil 'EMIT_HN_02.log' 'http://10.211.28.101:9121/inInt/EMIT_HN_02.do' 'T1302040001_001' '70' '00' '201302041742' 'eCAMS' 'A08101304' '201302041742'                  */
+/*		                                                                                                                                                                              */
+/*		                                                                                                                                                                              */
+/*		[I/F ID 04일때]                                                                                                                                                               */
+/*		                                                                                                                                                                              */
+/*		ITSMUtil '/mtzapp/ecams2/src/javasrc/coRst.log' 'http://10.211.28.101:9121/inInt/EMIT_HN_04.do' 'T1302040001_001' '30' '00' '201302041334' 'eCAMS' 'A08101304' '201302041334' */
+/*                                                                                                                                                                                  */
+/*****************************************************************/
+int  main(int argc, char **argv, char **envp)
+{
+
+char	szITSMId	                   [21]; /* ITSM ID            */
+char	szAcptNo	                   [13]; /* 신청번호           */
+char	szQryCd                       [3]; /* 신청구분           */
+char	szPrcDate                    [13]; /* 완료일시           */
+char	szEditor	                   [11]; /* 신청자ID           */
+char	szSysDate                    [13]; /* 현재일시           */
+char	szITSMUrl                   [512]; /* ITSM URL           */
+char	szPassCd                    [512]; /* 신청사유           */
+char	szStatus                      [3]; /* 상태               */
+char	szConfUsr                    [11]; /* 결재자             */
+char	szConfList                  [512]; /* 결재자List         */
+char	szTmpResult                 [512]; /* 처리결과파일       */
+char	tmpDir                      [512]; /* Temp Directory     */
+char	szSysCd                       [6]; /* 시스템             */
+char	szJobCd                      [11]; /* 업무               */
+FILE  *SrcPtr                  ;
+char	*dummy                   ;      /* Read Buffer             */
+long	nFileSize                ;
+char	*Readbuf                 ;
+int   cnt;
+
+    memset(szITSMId   , 0x00, sizeof(szITSMId   ));
+    memset(szQryCd    , 0x00, sizeof(szQryCd    ));
+    memset(szAcptNo   , 0x00, sizeof(szAcptNo   ));
+    memset(szPrcDate  , 0x00, sizeof(szPrcDate  ));
+    memset(szEditor   , 0x00, sizeof(szEditor   ));
+    memset(szSysDate  , 0x00, sizeof(szSysDate  ));
+    memset(szITSMUrl  , 0x00, sizeof(szITSMUrl  ));
+    memset(szPassCd   , 0x00, sizeof(szPassCd   ));
+    memset(SysCmd     , 0x00, sizeof(SysCmd     ));
+    memset(szConfUsr  , 0x00, sizeof(szConfUsr  ));
+    memset(szConfList , 0x00, sizeof(szConfList ));
+    memset(szTmpResult, 0x00, sizeof(szTmpResult));
+    memset(szSysCd    , 0x00, sizeof(szSysCd    ));
+    memset(szJobCd    , 0x00, sizeof(szJobCd    ));
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+
+    /*-----------------------------------------------------------*/
+    /*   Temp 디렉토리명 조회                                    */
+    /*-----------------------------------------------------------*/
+    SetTempDir("99", tmpDir);
+    
+		/*-----------------------------------------------------------*/
+		/* 로그 파일 Set	        	  		                           */
+		/*-----------------------------------------------------------*/
+		Get_Sys_Date(gszLogFile);
+		strcat(gszLogFile,".log");
+		strcpy(gszLogPath,"LogMessage/");
+  /*-----------------------------------------------------------*/
+  /*   대상 건 조회                                            */
+  /*-----------------------------------------------------------*/
+	EXEC SQL DECLARE SYSEND_List CURSOR FOR
+		SELECT  A.CR_ITSMID
+		      , A.CR_ACPTNO
+		      , A.CR_SYSCD
+		      , C.CR_JOBCD
+		      , DECODE(A.CR_QRYCD,'03','50',
+		                          '04','70',
+		                          '11','80',
+		                          '12','90',
+                              '30')		                          
+		      , TO_CHAR(A.CR_PRCDATE,'YYYYMMDDHH24MI')
+		      , A.CR_EDITOR
+		      , TO_CHAR(SYSDATE,'YYYYMMDDHH24MI')
+		      , A.CR_PASSCD
+		      , DECODE(A.CR_STATUS,'3','01',
+		                           '00')
+		      , 'http://' || B.CM_SVRIP || ':' ||  B.CM_PORTNO || '/inInt'
+		  FROM  CMR1000 A,CMM0015 B,CMR1010 C
+		 WHERE  A.CR_EMRCD IS NULL
+		   AND  TO_CHAR(A.CR_ACPTDATE,'YYYYMMDDHH24MI')>='201302051334'
+		   AND  A.CR_PRCDATE IS NOT NULL
+		   AND  B.CM_STNO='ECAMS'
+		   AND  B.CM_GBNCD='IT'
+		   AND  A.CR_ACPTNO=C.CR_ACPTNO
+		   AND  C.CR_SERNO=1;
+
+	EXEC SQL open  SYSEND_List;
+  while (1) {
+		EXEC SQL fetch SYSEND_List
+			INTO  :szITSMId
+				  , :szAcptNo
+				  , :szSysCd
+				  , :szJobCd
+			    , :szQryCd
+			    , :szPrcDate
+			    , :szEditor
+			    , :szSysDate
+			    , :szPassCd
+			    , :szStatus
+			    , :szITSMUrl;
+			    	
+		if (sqlca.sqlcode == 1403)	break;
+			
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+				sprintf(gszLogMsg,"ecams_ITSMInf DB FETCH ERROR : [%d] [%s]", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				break;
+		}
+
+		NotUseDataTruncate (szITSMId   ,	0x20);
+		NotUseDataTruncate (szAcptNo   ,	0x20);
+		NotUseDataTruncate (szQryCd    ,	0x20);
+		NotUseDataTruncate (szSysCd    ,	0x20);
+		NotUseDataTruncate (szJobCd    ,	0x20);
+		NotUseDataTruncate (szStatus   ,	0x20);
+		NotUseDataTruncate (szPrcDate  ,	0x20);
+		NotUseDataTruncate (szEditor   ,	0x20);
+		NotUseDataTruncate (szSysDate  ,	0x20);
+		NotUseDataTruncate (szITSMUrl  ,	0x20);
+		sprintf(szPassCd, "%s", trunc_char(szPassCd));
+		
+	  if (strcmp(szQryCd,"70") == 0 && strlen(szITSMId) == 0 && strcmp(szStatus,"01") != 0) {
+	  	/* 긴급처리완료 */
+	  	
+	  	EXEC SQL DECLARE SYSCONF_List CURSOR FOR
+				SELECT  CR_CONFUSR
+				  FROM  CMR9900
+				 WHERE  CR_ACPTNO=:szAcptNo
+				 	 AND  CR_LOCAT<>'00'
+				 	 AND  CR_CONFDATE IS NOT NULL
+				 	 AND  CR_TEAMCD<>'1';
+		
+			EXEC SQL open  SYSCONF_List;
+		  while (1) {
+				EXEC SQL fetch SYSCONF_List
+					INTO  :szConfUsr;
+					    	
+				if (sqlca.sqlcode == 1403)	break;
+					
+				if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+						sprintf(gszLogMsg,"ecams_ITSMInf SYSCONF_List DB FETCH ERROR : [%d] [%s]", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						break;
+				}
+				
+				NotUseDataTruncate (szConfUsr   ,	0x20);
+				
+				if (strlen(szConfList) == 0) strcpy(szConfList,szConfUsr);
+				else sprintf(szConfList,"%s,%s",szConfList,szConfUsr);
+			}
+			EXEC SQL close SYSCONF_List;
+	  	sprintf(SysCmd, "java ITSMUtil \"%s/%s\" \"%s/EMIT_HN_04.do\" \"%s\" \"%s\" \"%s\" \"%s\" 01 01 \"%s\" 01 \"%s\" \"%s\" \"%s\" \"%s\" "
+							,tmpDir							
+							,szAcptNo
+							,szITSMUrl
+							,szPassCd
+							,szEditor
+							,szEditor
+							,left_char(szPrcDate,8)
+							,szConfList
+							,szPassCd
+							,szSysDate
+							,szSysCd
+							,szJobCd);	
+		           
+			/*LOG*/sprintf(gszLogMsg,"[%s] ITSM Util EMIT_HN_04 CALL START!![%s] ",
+											 szAcptNo,SysCmd);			
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				   
+			nRet1 = system(SysCmd) / 256;
+		    
+		  /*LOG*/sprintf(gszLogMsg,"[%s] ITSM Util EMIT_HN_04 CALL END!!!! RET=[%d]",
+											 szAcptNo,nRet1);			
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			
+			if (nRet1 != 0){
+				/*LOG*/sprintf(gszLogMsg,"[%s] ITSM Util EMIT_HN_04 CALL ERR!!!! RET=[%d] command=[%s]",
+												 szAcptNo,nRet1,SysCmd);		
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				continue;
+			}
+		} else if (strlen(szITSMId) > 0) {
+			if (strcmp(szQryCd,"80") == 0) {
+			   /* 체크아웃취소의 경우 동일한 subsr로 모든 건이 취소된 경우에만 */
+			   EXEC SQL
+						SELECT COUNT(*)
+						  INTO cnt
+						  FROM CMR1010 A,CMR1000 B
+						 WHERE B.CR_ITSMID=:szITSMId
+						 	 AND B.CR_QRYCD IN ('01','02','03')
+						 	 AND B.CR_ACPTNO=A.CR_ACPTNO
+						 	 /*AND A.CR_CONFNO IS NULL;*/
+						 	 AND B.CR_REQDOC IS NULL;
+			   if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+						sprintf(gszLogMsg,"ITSM Interface END COUNT SELECT Err!!! : [%s] [%d] [%s]", szITSMId, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						continue;
+				 }
+				 if (cnt > 0) continue;
+			} else if (strcmp(szQryCd,"50") == 0) {
+			   if (strcmp(szStatus,"00") == 0) {
+			     	/* 테스트적용의 경우 */
+			     	/* 동일한 subsr의 체크아웃 건 중 테스트적용이 안된 건이 존재하는 경우 SKIP  */
+					   EXEC SQL
+								SELECT COUNT(*)
+								  INTO cnt
+								  FROM CMR0020 C,CMR1010 A,CMR1000 B
+								 WHERE B.CR_ITSMID=:szITSMId
+								 	 AND B.CR_QRYCD IN ('01','02')
+								 	 AND B.CR_ACPTNO=A.CR_ACPTNO
+								 	 AND A.CR_CONFNO IS NULL
+								 	 AND A.CR_ITEMID=A.CR_BASEITEM
+								 	 AND A.CR_ITEMID=C.CR_ITEMID
+								 	 AND C.CR_STATUS='5';			
+					   if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+								sprintf(gszLogMsg,"ITSM Interface END COUNT SELECT Err!!! : [%s] [%d] [%s]", szITSMId, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+								eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+								continue;
+						 }
+						 if (cnt > 0) continue;
+						 						 
+			     	/* 동일한 subsr의 테스트적용요청 건 중 미완료 건이 존재하는 경우 SKIP */	
+						 EXEC SQL
+								SELECT COUNT(*)
+								  INTO cnt
+								  FROM CMR1000 B
+								 WHERE B.CR_ITSMID=:szITSMId
+								 	 AND B.CR_QRYCD='03'
+								 	 AND B.CR_PRCDATE IS NULL;			
+					   if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+								sprintf(gszLogMsg,"ITSM Interface END COUNT SELECT Err!!! : [%s] [%d] [%s]", szITSMId, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+								eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+								continue;
+						 }
+						 if (cnt > 0) continue;	
+				 } else {
+			     	/* 테스트적용반려의 경우*/
+			     	/* 동일한 subsr로 체크아웃 받은 건 중 테스트적용요청 중인 건이 존재하는 경우 SKIP */
+					   EXEC SQL
+								SELECT COUNT(*)
+								  INTO cnt
+								  FROM CMR1000 B
+								 WHERE B.CR_ITSMID=:szITSMId
+								 	 AND B.CR_QRYCD='03'
+								 	 AND B.CR_REQDOC IS NOT NULL;			
+					   if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+								sprintf(gszLogMsg,"ITSM Interface END COUNT SELECT Err!!! : [%s] [%d] [%s]", szITSMId, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+								eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+								continue;
+						 }
+						 if (cnt == 0) continue;
+				 }	
+			}
+			/* Interface 02 완료일때 */
+			/*'EMIT_HN_02.log' 'http://10.211.28.101:9121/inInt/EMIT_HN_02.do' 'T1302040001_001' '30'  '00' '201302041334' 'eCAMS' 'A08101304' '201302041334' */
+	  	sprintf(SysCmd, "java ITSMUtil \"%s/%s\" \"%s/EMIT_HN_02.do\" \"%s\" \"%s\" \"%s\" \"%s\" eCAMS \"%s\" \"%s\" "
+							,tmpDir							
+							,szAcptNo
+							,szITSMUrl
+							,szITSMId
+							,szQryCd
+							,szStatus
+							,szPrcDate
+							,szEditor
+							,szSysDate);	
+		           
+			/*LOG*/sprintf(gszLogMsg,"[%s] ITSM Util EMIT_HN_02 CALL START!![%s] ",
+											 szAcptNo,SysCmd);			
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				   
+			nRet1 = system(SysCmd) / 256;
+		    
+		  /*LOG*/sprintf(gszLogMsg,"[%s] ITSM Util EMIT_HN_02 CALL END!!!! RET=[%d]",
+											 szAcptNo,nRet1);			
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			
+			if (nRet1 != 0){
+				/*LOG*/sprintf(gszLogMsg,"[%s] ITSM Util EMIT_HN_02 CALL ERR!!!! RET=[%d] command=[%s]",
+												 szAcptNo,nRet1,SysCmd);		
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				continue;
+			}
+		} else {
+			continue;
+		}		
+		/*-----------------------------------------------------------*/
+		/*		처리구분별 처리결과 체크                               */
+		/*-----------------------------------------------------------*/
+		sprintf(szTmpResult,"%s/%s",tmpDir,szAcptNo);
+		nFileSize = FileSizeInf(szTmpResult) + 1;
+		dummy = (char *)malloc(nFileSize);
+		memset(dummy, 0x00, nFileSize);
+	
+	  if ((SrcPtr = fopen(szTmpResult, "r")) == (FILE *) NULL) {
+			/*LOG*/sprintf(gszLogMsg,"[%s] [%s] 처리결과파일 OPEN 오류 [%s]",
+											 szAcptNo,szQryCd,szTmpResult);		
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			continue;
+		}
+	
+		while (fgets(dummy, nFileSize, SrcPtr) != (char *) NULL) {
+			sprintf(dummy,"%s",rep_char(dummy,"\n"  , ""));
+			sprintf(dummy,"%s",rep_char(dummy,"\r\n", ""));
+			sprintf(dummy,"%s",trunc_char(dummy));
+			Readbuf = (char *)malloc(nFileSize);
+	
+			memset(Readbuf, 0x00, nFileSize);
+			strcpy(Readbuf, dummy);
+	    /*LOG*/sprintf(gszLogMsg,"[%s] [%s] 처리결과파일 OPEN [%s]",
+											 szAcptNo,szQryCd,szTmpResult);		
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	    if (cmp_left_char(Readbuf,2,"OK") == 0) {
+	    	if (strlen(szITSMId) == 0) { /*긴급입니다*/
+	    		  sprintf(szITSMId,"%s",right_char(Readbuf,strlen(Readbuf)-2));
+	    		  EXEC SQL
+							UPDATE  CMR1000
+							   SET  CR_ITSMID = :szITSMId
+								     ,CR_EMRCD  = 'Y'
+							 WHERE  CR_ACPTNO = :szAcptNo;					
+	    	} else {
+	    		  EXEC SQL
+							UPDATE  CMR1000
+							   SET  CR_EMRCD  = 'Y'
+							 WHERE  CR_ACPTNO = :szAcptNo;
+					 
+	    		  EXEC SQL
+							UPDATE  CMR1000
+							   SET  CR_REQDOC = ''
+							 WHERE  CR_ITSMID = :szITSMId;
+	    	}	
+	    	
+				if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403) {
+					sprintf(gszLogMsg,"ITSM Interface Result Update Err!!! : [%s] [%d] [%s]", szAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				} else {
+					EXEC SQL COMMIT;
+				}
+	  	} else {
+	  		/*LOG*/sprintf(gszLogMsg,"[%s] ITSM Interface Call Error dummy=[%s]",
+												 szAcptNo,dummy);		
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+	    }	
+			free(Readbuf);
+		}
+		fclose (SrcPtr);
+		free(dummy);
+        
+	}	
+	EXEC SQL close SYSEND_List;
+	
+  exit (0);
+
+}
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

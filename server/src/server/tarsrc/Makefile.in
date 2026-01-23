@@ -1,0 +1,34 @@
+CC	= @CC@	
+CFLAGS	= @CFLAGS@
+INCLUDE	=	-I. -I.. -I../inc
+
+LIBOBJDIR = ../tarcom/
+
+LIBOBJS = @LIBOBJS@
+
+LIBTAR  = 	  append.o \
+                  block.o \
+                  decode.o \
+                  encode.o \
+                  extract.o \
+                  handle.o \
+                  libtar_hash.o \
+                  libtar_list.o \
+                  output.o \
+                  tutil.o \
+                  wrapper.o \
+		  tarutil.o
+
+all: libtar
+.SUFFIXES: .c .o
+
+.c.o:
+	$(CC)  $(CFLAGS) -c $*.c -o $@ $(INCLUDE)
+
+clean:
+	rm -f *.o core
+
+libtar: $(LIBOBJS) $(LIBTAR)
+	mv *.o ../object
+	mv $(LIBOBJDIR)*.o ../object
+

@@ -1,0 +1,354 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_filelist29.pc                          │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 일일 파일대사 결과 누적처리                  │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2012. 11. 20                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		내부함수			                                     */
+/*---------------------------------------------------------------*/
+int 	Process_RsrcInf01 	();
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+char	szSvrIP                [dfSvrIP];
+int		nPortNo                         ;
+int		nBefPort                        ;
+int     nJobSeq                         ;
+char	szDirPath                [dfDir];
+char	gSysCD                 [dfSysCD];
+char	szSysCd                [dfSysCD];
+char	szSvrCD                [dfSvrCD];
+char	szSysOS                [dfSysOS];
+char	szDiffDT                    [20];
+int  	szWeekCD                        ;
+char	szDiffBefDT                 [20];
+char	szDiffListPath           [dfDir];
+char	szDiffListHome           [dfDir];
+char 	indat                     [4096];
+char 	filename            [dfFullPath];
+int  	EOF_SW                          ;
+static 	char RsrcName       [dfRsrcName];
+int 	nCnt                            ;
+FILE 	*fptr                           ;
+FILE 	*analptr                        ;
+
+
+/*****************************************************************/
+/*                                                               */
+/*       일일 파일대사 결과 누적처리   M A I N                   */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+int		Retval			                ;
+int		ret                             ;
+char	sRstFile	 	    [dfFullPath];
+char	szRemotePath             [dfDir];
+char	szCommand           [dfFullPath];
+char	szGubun                    [1+1];
+
+
+	if (argc != 3) {
+		fprintf(stderr, "Usage : %s <파일대사일자> <구분(Y/N)>\n", argv[0]);
+		exit (1);
+	}
+
+
+	CMD_INFO CmdInfo;
+	InitCmdInfo(&CmdInfo);
+	sprintf(gszLogPath, "%s/", getenv("LOGPATH"));
+	Get_Sys_Date(gszLogFile);
+
+	strcat(gszLogFile,".log");
+
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);
+	sprintf(szRemotePath,"FileList.%s",gszLogFile);
+	strcpy(gszLogFile, szRemotePath);
+	
+	sprintf(szDiffDT   , "%s", argv[1]);
+	sprintf(szDiffBefDT, "%s", argv[1]);
+	sprintf(szGubun    , "%s", argv[2]);
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		/*LOG*/sprintf(gszLogMsg,"ecams_filelist	DB 연결 않됨 ");
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit(1);
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   Signal Define			                                 */
+    /*-----------------------------------------------------------*/
+    DefineSignal ();
+
+	while (1) {
+		EXEC SQL
+			SELECT  TO_CHAR(TO_DATE(:szDiffBefDT, 'YYYYMMDD') - 1, 'YYYYMMDD')
+			  INTO  :szDiffBefDT
+    			  FROM  DUAL;
+		
+		if (sqlca.sqlcode != 0)	break;
+
+		NotUseDataTruncate (szDiffBefDT, 0x20);
+
+		EXEC SQL
+			SELECT  TO_CHAR(TO_DATE(:szDiffBefDT, 'YYYYMMDD'), 'D')
+			  INTO  :szWeekCD
+			  FROM  DUAL;
+
+		if (sqlca.sqlcode != 0)	break;
+
+		if (szWeekCD == 5 ||
+ 		    szWeekCD == 6 )	
+			continue;
+
+		EXEC SQL
+			SELECT  COUNT(*)
+ 			  INTO  :nCnt
+			  FROM  CMM0050
+			 WHERE  CM_HOLIDAY = :szDiffBefDT
+ 			   AND  CM_CLOSEDT IS NULL;
+
+		if (sqlca.sqlcode != 0)
+			nCnt = 0;
+
+		if (nCnt > 0)	continue;
+
+		break;
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   Set Temp Directory                                      */
+    /*-----------------------------------------------------------*/
+	SetTempDir("99", gszTempPath);
+
+	NotUseDataTruncate(gszTempPath, 0x20);
+
+	/*-----------------------------------------------------------*/
+	/* 파일 생성시 파일이 저장될 경로 설정및 생성                */
+	/*-----------------------------------------------------------*/
+	SetTempDir("79",szDiffListPath);
+	NotUseDataTruncate(szDiffListPath, 0x20);
+	strcpy(szDiffListHome,szDiffListPath);
+	strcat(szDiffListPath,szDiffDT);
+
+	if (access(szDiffListPath,F_OK) != 0){
+		Local_Dir_Make(szDiffListPath);
+	}
+
+	/*-----------------------------------------------------------*/
+    /*   불법변경 파일대사                                       */
+    /*-----------------------------------------------------------*/
+	Process_RsrcInf01 (szGubun);
+
+	EXEC SQL COMMIT WORK RELEASE;
+
+	exit (0);
+
+}
+
+/*---------------------------------------------------------------*/
+/*  Function  : Process_RsrcInf01                                */
+/*	Action    : 일일 파일대사 결과 누적처리                      */
+/*  Parameter : pGubun : 작업구분                                */
+/*  Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int 	Process_RsrcInf01 	(char *pGubun
+							)
+{
+int 	nCnt                            ;
+int 	nJobSeq                         ;
+
+	
+	while (1) {
+		EXEC SQL
+			SELECT  NVL(COUNT(*), 0)
+			  INTO  :nCnt
+			  FROM  CMD0027
+			 WHERE  CD_DIFFRST = '00';
+			 
+		if (sqlca.sqlcode != 0)
+			nCnt = 0;
+			
+		if (nCnt == 0)	break;
+			  
+		EXEC SQL
+			DELETE  CMD0027				
+			 WHERE  CD_DIFFRST = '00'
+			   AND  ROWNUM <= 1000;
+		
+		printf("CMD0027 정상건 DELETE [%d]\n", sqlca.sqlcode);
+		
+		EXEC SQL COMMIT WORK;
+	}
+
+	printf("ecams_filelist29 CMD0027 정상건 DELETE END \n");
+		
+	if (strcmp(pGubun, "Y") != 0) {
+		return 0;
+	}
+	
+	
+	/*-----------------------------------------------------------*/
+    /*   파일대사 당일분 삭제                                    */
+    /*-----------------------------------------------------------*/    
+	EXEC SQL 
+		DELETE  CMD0029
+		 WHERE  CD_DIFFDT = :szDiffDT;
+
+	printf("ecams_filelist29 CMD0029 DELETE END \n");
+	
+	EXEC SQL COMMIT;
+
+
+	/*-----------------------------------------------------------*/
+    /*   파일대사 당일분 등록                                    */
+    /*-----------------------------------------------------------*/
+	EXEC SQL  DECLARE CMD0026_LIST CURSOR FOR
+		SELECT  CD_JOBSEQ
+		  FROM  CMD0026
+		 WHERE  CD_DIFFDT = :szDiffDT
+		   AND  CD_GUBUN  = '1' ;
+
+	EXEC SQL open  CMD0026_LIST;
+    while (1) {
+		EXEC SQL FETCH CMD0026_LIST
+			INTO  :nJobSeq;
+
+		if (sqlca.sqlcode == 1403) 	break;
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) break;
+			
+			
+		EXEC SQL
+			INSERT  INTO  CMD0029
+				  ( CD_DIFFDT
+				  , CD_SVRIP
+				  , CD_SYSCD
+				  , CD_DIRPATH
+				  , CD_RSRCNAME
+				  , CD_SVRCD
+				  , CD_SVRNAME
+				  , CD_DIFFRST
+				  , CD_ECAMSSIZE
+				  , CD_ECAMSDATE
+				  , CD_ECAMSMD5
+				  , CD_SVRSIZE
+				  , CD_SVRDATE
+				  , CD_SVRMD5
+				  , CD_DSNCD
+				  , CD_RSTCOND
+				  , CD_RUNDATE
+				  , CD_CLOSEYN
+				  , CD_OPENYN
+				  , CD_VERYN
+				  , CD_RSRCCD
+				  , CD_VIEWYN            
+				  )
+			SELECT  DISTINCT
+			        a.CD_DIFFDT
+				  , a.CD_SVRIP
+				  , a.CD_SYSCD
+				  , a.CD_DIRPATH
+				  , a.CD_RSRCNAME
+				  , a.CD_SVRCD
+				  , a.CD_SVRNAME
+				  , a.CD_DIFFRST
+				  , a.CD_ECAMSSIZE
+				  , a.CD_ECAMSDATE
+				  , a.CD_ECAMSMD5
+				  , a.CD_SVRSIZE
+				  , a.CD_SVRDATE
+				  , a.CD_SVRMD5
+				  , a.CD_DSNCD
+				  , a.CD_RSTCOND
+				  , a.CD_RUNDATE
+				  , a.CD_CLOSEYN
+				  , a.CD_OPENYN
+				  , a.CD_VERYN
+				  , a.CD_RSRCCD
+				  , a.CD_VIEWYN            
+			  FROM  CMM0030 c
+	              , CMM0020 b
+	       		  , CMD0027 a 
+		     WHERE  a.CD_DIFFDT = :szDiffDT
+	           AND  a.CD_JOBSEQ = :nJobSeq
+	           AND  b.CM_MACODE = 'DIFFRST'
+	           AND  b.CM_MICODE = a.CD_DIFFRST
+	           AND  a.CD_SYSCD  = c.CM_SYSCD(+)
+	           AND  a.CD_VIEWYN = 'Y'
+/*
+	           AND  a.CD_DIFFrst IN ('FE','FK','FM','FZ','FL');
+*/	           
+	           AND  a.CD_DIFFrst IN ('FK','FM','FZ','FL');
+	
+		printf("ecams_filelist29 CMD0029 INSERT END  [%5d] SQLCODE = %d\n", nJobSeq, sqlca.sqlcode);
+		
+		EXEC SQL COMMIT;
+	}
+    EXEC SQL CLOSE CMD0026_LIST;
+		
+	
+	printf("ecams_filelist29 CMD0029 INSERT END  \n");
+	
+	EXEC SQL
+		UPDATE  CMD0029 a
+           SET  CD_ERRCLSDT = :szDiffDT
+         WHERE  CD_ERRCLSDT IS NULL
+           AND  CD_DIFFDT != :szDiffDT
+           AND  NOT EXISTS  (SELECT  'x'
+                               FROM  CMD0029
+                              WHERE  CD_SYSCD    = a.CD_SYSCD
+                                AND  CD_DIFFDT   = :szDiffDT
+                                AND  CD_SVRIP    = a.CD_SVRIP
+                                AND  CD_DIRPATH  = a.CD_DIRPATH
+                                AND  CD_RSRCNAME = a.CD_RSRCNAME
+                           );
+	
+	printf("ecams_filelist29 CMD0029 UPDATE END  %d\n", sqlca.sqlcode);
+
+	EXEC SQL COMMIT;
+	
+
+	EXEC SQL EXECUTE
+		BEGIN
+			ERRDAYCNT (:szDiffDT, :szDiffBefDT);
+		END;
+	END-EXEC;
+
+	EXEC SQL COMMIT;
+
+	printf("ecams_filelist29 CMD0029 ERRDAYCNT END  %d\n", sqlca.sqlcode);
+	
+
+	return 0;
+
+}
+
+
+/*---------------------------------------------------------------*/
+/*                E N D   O F   F I L E                          */
+/*---------------------------------------------------------------*/
+

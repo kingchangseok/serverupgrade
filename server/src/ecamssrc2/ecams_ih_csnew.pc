@@ -1,0 +1,485 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_ih_csnew.pc                             │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 형상관리(eCAMS) 자원이행 MAIN                │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2007. 08. 16                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+#define WIN  0
+#define UNIX 1
+
+EXEC SQL INCLUDE "ecams_acct.h";
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;  
+  char	   gConnStr          [50];    /* Connect String          */
+  int      gErrNo                       ;
+EXEC SQL END DECLARE SECTION;
+
+/*****************************************************************/
+/*                                                               */
+/*      자원이행 처리  M A I N                                   */
+/*                                                               */
+/*****************************************************************/
+int 	main(int argc, char *argv[])
+{
+char 	szSysCD                [dfSysCD];
+char 	szDsnCD                [dfDsnCD];
+char 	szRsrcCD              [dfRsrcCD];
+char 	szJobCD                [dfJobCD];
+char 	szServerIP             [dfSvrIP];
+char 	szPath                   [dfDir];
+char 	szFileList          [dfFullPath];
+char 	szFileList1         [dfFullPath];
+char 	szFileList2         [dfFullPath];
+short 	bFlag = UNIX                    ;
+int 	nRst                            ;
+char 	szTempFile          [dfFullPath];
+char 	szCommand           [dfFullPath];
+char 	szDirPath           [dfFullPath];
+char    szRsrcName          [dfRsrcName];
+char 	szAgentDir               [dfDir];
+char    szCodeRsrc          [100];
+char    szCodeJob           [100];
+char    wkRsrcCD            [256];
+char    wkRsrcCD2           [256];
+char    wkRsrcCD3           [256];
+char    wkJobCD             [256];
+char    wkJobCD2            [256];
+char    pRsrcCD               [3];
+char    pJobCD               [11];
+char    ExtName             [512];
+char    szExt               [100];
+char    dummy                    [1024];
+char	*szKeys[5]             ;
+int		Index_key=0            ;
+char	*toktmp                ;
+int     nPort;
+char	SysCmd            [256];
+FILE *SrcPtr;
+FILE *SrcPtr2; 
+
+CMD_INFO	  CmdInfo;
+
+
+	if (argc != 9) {
+		printf("USAGE : %s <시스템> <서버주소> <Socket Port> <Buffer Size> <이행 Directory> <OutFile> <GBNCD> <AgentDir> \n",argv[0]);
+		exit(1);
+	}
+
+	sprintf(szSysCD   , "%s", argv[1]);
+	sprintf(szServerIP, "%s", argv[2]);
+	sprintf(szPath    , "%s", argv[5]);
+	sprintf(szFileList, "%s", argv[6]);
+	sprintf(szAgentDir, "%s", argv[8]);
+
+	if (Char_Check(szPath,":") > 0) {
+		sprintf(szPath, "%s", rep_char(szPath,"/","\\"));
+		fprintf(stdout, "WINDOWS 이행입니다........... \n");
+		bFlag = WIN;
+	}
+	else
+		fprintf(stdout, "UNIX 이행입니다.. [%s] \n", szPath);
+
+	InitCmdInfo(&CmdInfo);
+
+	CmdInfo.nPort = atoi(argv[3]);
+	dfMaxFileSize = atoi(argv[4]);
+		
+	fprintf(stdout, "파일이름...[%s]\n",szFileList);
+    sprintf(szFileList1, "tmp/%s.%s.ih.cs", szFileList, szSysCD);
+	sprintf(szFileList , "%s.%s.ih"   , szFileList, szSysCD);
+
+	if (bFlag == WIN) {
+		sprintf(szAgentDir, "%s", rep_char(szAgentDir, "/", "\\"));
+	}
+
+	/*-----------------------------------------------------------*/
+	/*  파일 리스트 생성                                         */
+	/*-----------------------------------------------------------*/
+	fprintf(stdout, "파일리스트 생성중...[%s]\n",szFileList);
+	strcpy(CmdInfo.szServerIP, szServerIP);
+	strcpy(CmdInfo.szJobGub,"S");
+	if (bFlag == WIN)
+	   if (strcmp(argv[7],"9") == 0)
+		   sprintf(CmdInfo.szCommand,"DIR /S \"%s\" > %s\\%s", szPath, szAgentDir, szFileList);
+	   else
+		   sprintf(CmdInfo.szCommand,"DIR    \"%s\" > %s\\%s", szPath, szAgentDir, szFileList);
+	else
+	   if (strcmp(argv[7],"9") == 0)
+		  sprintf(CmdInfo.szCommand,"ls -lLR '%s' > %s/%s", szPath, szAgentDir, szFileList);
+	   else
+		  sprintf(CmdInfo.szCommand,"ls -l   '%s' > %s/%s", szPath, szAgentDir, szFileList);
+
+	fprintf(stdout, "명령문 : [%s]\n", CmdInfo.szCommand);
+
+	Server_Cmd_JOB(&CmdInfo);
+
+	/*-----------------------------------------------------------*/
+	/* 	생성 파일 GET                                            */
+	/*-----------------------------------------------------------*/
+	fprintf(stdout, "파일리스트 GET...[%s/%s]\n",szAgentDir,szFileList);
+	strcpy(CmdInfo.szJobGub,"G");
+	sprintf(CmdInfo.szLocal,"%s",szFileList1);
+	sprintf(CmdInfo.szCommand, "%s", "");
+	if (bFlag == WIN) {
+		sprintf(CmdInfo.szRemote,"%s\\%s", szAgentDir, szFileList);
+		sprintf(CmdInfo.szRemote, "%s", rep_char(CmdInfo.szRemote, "\\\\", "\\"));
+	}
+	else {
+		sprintf(CmdInfo.szRemote,"%s/%s", szAgentDir, szFileList);
+	}
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		fprintf(stdout, "파일 리스트를 가져오지 못했습니다.[%s] \n",CmdInfo.szRstCond);
+		exit(1);
+
+	}
+    
+	/*-----------------------------------------------------------*/
+	/* 	서버에 생성 파일 삭제                                    */
+	/*-----------------------------------------------------------*/
+	fprintf(stdout, "서버에 생성 파일 삭제...\n");
+	strcpy(CmdInfo.szJobGub,"S");
+	if (bFlag == WIN)
+		sprintf(CmdInfo.szCommand,"DEL /F %s\\%s",szAgentDir, szFileList);
+	else
+		sprintf(CmdInfo.szCommand,"rm -rf %s/%s",szAgentDir, szFileList);
+	Server_Cmd_JOB(&CmdInfo);
+	LookCMD_INFO(&CmdInfo);
+	
+	/*-----------------------------------------------------------*/
+	/*	ls -lR 실행시 지정 디렉토리는 출력이 않되므로 추가 시켜  */
+	/*	줘야 함                                                  */
+	/*-----------------------------------------------------------*/
+	sprintf(szTempFile,"%s.tmp",szFileList1);
+	if (bFlag != WIN) {
+		FILE * fp;
+		if ((fp = fopen(szTempFile,"w")) == NULL) {
+			printf("임시파일 생성 실패!\n");
+			exit(1);
+		}
+
+		fprintf(fp,"%s:\n",szPath);
+		fclose(fp);
+
+		sprintf(szCommand,"cat %s >> %s",szFileList1, szTempFile);
+		printf("%s\n",szCommand);
+		nRst = system(szCommand);
+
+		fprintf(stdout, "patch Rst = %d\n", nRst);
+		if (nRst != 0) {
+			fprintf(stderr, "파일리스트에 경로 추가 실패!\n");
+			exit(1);
+		}
+		else {
+		    sprintf(szCommand,"mv %s %s", szTempFile,szFileList1);
+		    printf("%s\n",szCommand);
+		    nRst = system(szCommand);
+	    }
+	    remove(szTempFile);
+	}
+
+	sprintf(SysCmd, "ecams_fileconv %s 1", szFileList1);
+	system (SysCmd);
+	
+	sprintf(szFileList2,"%s.file",szFileList1);
+	
+	remove(szFileList2);
+	
+    if ((SrcPtr = fopen(szFileList1, "r")) == (FILE *) NULL) {
+    	fprintf(stderr, "결과파일 1 OPEN Error [%s]!\n",szFileList1);
+		exit(1);
+	}
+	if ((SrcPtr2 = fopen(szFileList2, "w")) == (FILE *) NULL) {
+    	fprintf(stderr, "결과파일 2 OPEN Error [%s]!\n",szFileList2);
+		exit(1);
+	}
+					
+	/*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+	
+	memset(dummy, 0x00, sizeof(dummy));
+	
+	while (fgets(dummy, 1024, SrcPtr) != (char *) NULL) {
+		sprintf(dummy, "%s",rep_char(dummy,"\n"  , ""));  
+	    sprintf(dummy, "%s",rep_char(dummy,"\r\n", "")); 
+		sprintf(dummy, "%s",trunc_char(dummy)); 
+	    
+	    if (strlen(dummy) < 1) continue;	
+	    /* printf("dummy==[%s]\n",	dummy); */
+		if (cmp_left_char(dummy,1,"d") != 0) {
+			if (cmp_left_char(dummy,1,"/") == 0) {
+				sprintf(szDirPath,"%s",rep_char(dummy,":",""));
+			} else if (cmp_left_char(dummy,1,"-") == 0) {
+				Index_key = 0;
+				while(1) {
+					if (Index_key == 0) {
+						szKeys[Index_key] = strtok_r(dummy, " ", &toktmp);
+					}
+					else
+						szKeys[Index_key] = strtok_r(NULL, (char *)" ", &toktmp);
+			
+					if (szKeys[Index_key] == NULL)
+						break;
+					
+					Index_key++;
+				}
+				/* printf("Index_key==[%d]\n",	Index_key); */
+				strcpy(szRsrcName,szKeys[--Index_key]);
+				
+				/* printf("dummy=[%s][%s]\n",szDirPath,szRsrcName); */
+				
+				memset(szDsnCD   ,0x00 ,sizeof(szDsnCD));
+				memset(wkRsrcCD  ,0x00 ,sizeof(wkRsrcCD));
+				memset(wkRsrcCD2 ,0x00 ,sizeof(wkRsrcCD2));
+				memset(wkJobCD   ,0x00 ,sizeof(wkJobCD));
+				memset(szExt     ,0x00 ,sizeof(szExt));
+				memset(szRsrcCD  ,0x00 ,sizeof(szRsrcCD));
+				memset(szJobCD   ,0x00 ,sizeof(szJobCD));
+				
+				EXEC SQL
+					SELECT  CM_DSNCD
+					  INTO  :szDsnCD
+					  FROM  CMM0070
+					 WHERE  CM_SYSCD   = :szSysCD
+					   AND  CM_DIRPATH = :szDirPath;
+			    NotUseDataTruncate (szDsnCD, 0x20);
+			    
+			    if (strlen(szDsnCD) > 0) {
+			    	nRst = 0;
+					EXEC SQL
+					   	SELECT COUNT(*)
+					   	  INTO :nRst
+					   	  FROM CMR0020
+					   	 WHERE CR_SYSCD    = :szSysCD
+					   	   AND CR_DSNCD    = :szDsnCD
+					   	   AND CR_RSRCNAME = :szRsrcName;
+					if (nRst > 0) {
+						continue;
+					} else {
+						EXEC SQL DECLARE RSRCCD_CURSOR CURSOR FOR
+							SELECT  CM_RSRCCD
+							  FROM  CMM0072
+							 WHERE  CM_SYSCD   = :szSysCD
+							   AND  CM_DSNCD   = :szDsnCD;
+					    EXEC SQL open  RSRCCD_CURSOR;
+						while (1) {
+							EXEC SQL fetch RSRCCD_CURSOR into :pRsrcCD;
+								
+							if (sqlca.sqlcode == 1403)
+								break;
+								
+							NotUseDataTruncate (pRsrcCD, 0x20);
+							
+							if (strlen(wkRsrcCD) == 0) strcpy(wkRsrcCD,pRsrcCD);
+							else sprintf(wkRsrcCD,"%s:%s",wkRsrcCD,pRsrcCD);
+								
+						}	
+						EXEC SQL close RSRCCD_CURSOR;
+						
+						EXEC SQL DECLARE JOBCD_CURSOR CURSOR FOR
+							SELECT  CM_JOBCD
+							  FROM  CMM0073
+							 WHERE  CM_SYSCD   = :szSysCD
+							   AND  CM_DSNCD   = :szDsnCD;
+					    EXEC SQL open  JOBCD_CURSOR;
+						while (1) {
+							EXEC SQL fetch JOBCD_CURSOR into :pJobCD;
+								
+							if (sqlca.sqlcode == 1403)
+								break;
+						
+							NotUseDataTruncate (pJobCD, 0x20);
+							
+							if (strlen(wkJobCD) == 0) strcpy(wkJobCD,pJobCD);
+							else sprintf(wkJobCD,"%s:%s",wkJobCD,pJobCD);
+								
+						}	
+						EXEC SQL close JOBCD_CURSOR;	
+					}
+				}
+				/* 
+				printf("338 line=[%s][%s][%s][%s]\n",szDirPath,szRsrcName,wkRsrcCD,wkJobCD);
+				printf("339 line=[%s][%s][%d][%s]\n",szSysCD,CmdInfo.szServerIP,CmdInfo.nPort,szDirPath);
+				*/
+				EXEC SQL DECLARE RSRCCD2_CURSOR CURSOR FOR
+					SELECT  B.CM_RSRCCD
+					  FROM  CMM0038 B,CMM0031 A
+					 WHERE  A.CM_SYSCD   = :szSysCD
+					   AND  A.CM_SVRIP   = :CmdInfo.szServerIP
+					   AND  A.CM_PORTNO  = :CmdInfo.nPort
+					   AND  A.CM_CLOSEDT IS NULL
+					   AND  A.CM_SYSCD   = B.CM_SYSCD
+					   AND  A.CM_SVRCD   = B.CM_SVRCD
+					   AND  A.CM_SEQNO   = B.CM_SEQNO
+					   AND  LENGTH(B.CM_VOLPATH)<=LENGTH(:szDirPath)
+					   AND  SUBSTR(:szDirPath,1,LENGTH(B.CM_VOLPATH))=B.CM_VOLPATH ;
+			    EXEC SQL open  RSRCCD2_CURSOR;
+				while (1) {
+					EXEC SQL fetch RSRCCD2_CURSOR into :pRsrcCD;
+					
+					if (sqlca.sqlcode == 1403)
+						break;
+						
+					NotUseDataTruncate (pRsrcCD, 0x20);
+						
+					if (strlen(wkRsrcCD)>0) {
+						if (Char_Check(wkRsrcCD,pRsrcCD) < 0) {
+							if (strlen(wkRsrcCD2) == 0) strcpy(wkRsrcCD2,pRsrcCD);
+							else sprintf(wkRsrcCD2,"%s:%s",wkRsrcCD2,pRsrcCD); 	
+						} else {
+							sprintf(wkRsrcCD,"%s:%s",wkRsrcCD,pRsrcCD); 		
+						}
+					} else {
+						if (strlen(wkRsrcCD2) == 0) strcpy(wkRsrcCD2,pRsrcCD);
+						else sprintf(wkRsrcCD2,"%s:%s",wkRsrcCD2,pRsrcCD); 		
+					}						
+				}	
+				EXEC SQL close RSRCCD2_CURSOR;
+				
+				if (strlen(wkRsrcCD2)==0) strcpy(wkRsrcCD2,wkRsrcCD);
+				/*printf("369 line=[%s][%s][%s][%s]\n",szDirPath,szRsrcName,wkRsrcCD2,wkJobCD);*/
+				if (Char_Check(szRsrcName,".")>0) {
+					nRst = Char_Check(szRsrcName, ".");	
+			        strcpy(ExtName , szRsrcName);
+					while (1) {
+						nRst = Char_Check(ExtName, ".");
+						/*printf("385 line=[%s][%s][%s][%s][%d]\n",szDirPath,szRsrcName,ExtName,szExt,nRst);*/	
+						if (nRst >= 0) {
+					 	    sprintf(szExt, "%s", right_char(ExtName, strlen(ExtName) - nRst));
+							sprintf(ExtName, "%s", right_char(ExtName, strlen(ExtName) - (nRst+1)));
+						}
+						else {
+						   break;
+			            }
+					}
+				}
+				
+				if (strlen(szExt) == 0) continue;
+				/*printf("386 line=[%s][%s][%s][%s][%s]\n",szDirPath,szRsrcName,wkRsrcCD,wkJobCD,szExt);*/	
+				memset(wkRsrcCD  ,0x00 ,sizeof(wkRsrcCD));	
+				sprintf(szExt,"%s,",szExt);
+			    EXEC SQL DECLARE RSRCCD3_CURSOR CURSOR FOR
+					SELECT  A.CM_RSRCCD
+					  FROM  CMM0036 A
+					 WHERE  A.CM_SYSCD   = :szSysCD
+					   AND  A.CM_CLOSEDT IS NULL
+					   AND  A.CM_RSRCCD NOT IN (SELECT CM_SAMERSRC FROM CMM0037
+					                             WHERE CM_SYSCD  = :szSysCD
+					                               AND CM_FACTCD = '04')
+					   AND  LENGTH(A.CM_EXENAME)>0 
+					   AND  INSTR(A.CM_EXENAME,:szExt)>0;
+			    EXEC SQL open  RSRCCD3_CURSOR;
+				while (1) {
+					EXEC SQL fetch RSRCCD3_CURSOR into :pRsrcCD;
+					
+					if (sqlca.sqlcode == 1403)
+						break;
+							
+					NotUseDataTruncate (pRsrcCD, 0x20);
+					
+					if (strlen(wkRsrcCD2)>0) {
+						if (Char_Check(wkRsrcCD2,pRsrcCD) >= 0) {
+							if (strlen(wkRsrcCD) == 0) strcpy(wkRsrcCD,pRsrcCD);
+							else sprintf(wkRsrcCD,"%s:%s",wkRsrcCD,pRsrcCD);
+						} else {
+							sprintf(wkRsrcCD2,"%s:%s",wkRsrcCD2,pRsrcCD); 		
+						}
+					} else {
+						if (strlen(wkRsrcCD) == 0) strcpy(wkRsrcCD,pRsrcCD);
+						else sprintf(wkRsrcCD,"%s:%s",wkRsrcCD,pRsrcCD);
+					}						
+				}	
+				EXEC SQL close RSRCCD3_CURSOR;				
+				
+				if (strlen(wkRsrcCD) == 0) strcpy(wkRsrcCD,wkRsrcCD2);
+				/*printf("417 line=[%s][%s][%s][%s]\n",szDirPath,szRsrcName,wkRsrcCD,wkJobCD);*/
+				if (strlen(wkRsrcCD) == 0) {
+					EXEC SQL
+					    SELECT CM_RSRCCD
+					      INTO :wkRsrcCD
+					      FROM CMM0036
+					     WHERE CM_SYSCD   = :szSysCD
+					       AND CM_CLOSEDT IS NULL
+					       AND CM_RSRCCD NOT IN (SELECT CM_SAMERSRC FROM CMM0037
+					                             WHERE CM_SYSCD  = :szSysCD
+					                               AND CM_FACTCD = '04')
+					       AND ROWNUM=1;	
+					 NotUseDataTruncate (wkRsrcCD, 0x20);				     
+				}	
+				if (strlen(wkRsrcCD) < 2) continue;
+				else {
+					sprintf(szRsrcCD,"%s",left_char(wkRsrcCD,2));
+				}
+				if (strlen(wkJobCD) == 0) {					
+					EXEC SQL
+					    SELECT CM_JOBCD
+					      INTO :wkJobCD
+					      FROM CMM0034
+					     WHERE CM_SYSCD   = :szSysCD
+					       AND CM_CLOSEDT IS NULL
+					       AND ROWNUM=1;	
+					NotUseDataTruncate (wkJobCD, 0x20);					     
+				}	
+				if (strlen(wkJobCD) < 2) continue;
+				else {
+					if (Char_Check(wkJobCD,":") >= 0) {
+						nRst = Char_Check(wkJobCD,":");
+						sprintf(szJobCD,"%s",left_char(wkJobCD,nRst-1));	
+					} else {
+						sprintf(szJobCD,"%s",wkJobCD);
+					}
+				}
+				/*printf("456 line=[%s][%s][%s][%s]\n",szDirPath,szRsrcName,szRsrcCD,szJobCD);	*/
+				if (strlen(szRsrcCD) > 0 && strlen(szJobCD) >0) {
+					EXEC SQL
+					    SELECT CM_CODENAME
+					      INTO :szCodeRsrc
+					      FROM CMM0020
+					     WHERE CM_MACODE = 'JAWON'
+					       AND CM_MICODE = :szRsrcCD;	
+					       	
+					sprintf(szCodeRsrc, "%s", trunc_char(szCodeRsrc));				
+					
+					EXEC SQL
+					    SELECT CM_JOBNAME
+					      INTO :szCodeJob
+					      FROM CMM0102
+					     WHERE CM_JOBCD = :szJobCD;
+					sprintf(szCodeJob, "%s", trunc_char(szCodeJob));	
+					/*printf("498 line=[%s][%s][%s][%s]\n",szDirPath,szRsrcName,szCodeRsrc,szCodeJob);*/
+					fprintf(SrcPtr2,"%s:%s:%s:%s\n",szDirPath,szRsrcName,szCodeRsrc,szCodeJob);
+					fflush(SrcPtr2);
+				}
+			}
+		}
+	}
+	fclose (SrcPtr);
+	fclose (SrcPtr2);
+	
+	exit (0);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

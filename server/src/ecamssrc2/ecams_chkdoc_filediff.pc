@@ -1,0 +1,307 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_chkdoc_filediff.pc                          │
+ ├──────┼───────────────────────┤
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2014. 09. 03                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                        */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                         */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+char  szExePgm          [50];
+
+
+int		main (int argc, char **argv, char **envp)
+{
+	char	szSysCD         [dfSysCD];
+	char	szRsrcCD       [dfRsrcCD];
+	char    szJobCD         [dfJobCD];
+	char	szRsrcName   [dfRsrcName];
+	char	szItemId       [dfItemID];
+	int		szSvrSeq;
+	char	szSvrIP         [dfSvrIP];
+	int		szPortNo;
+	char	szSysOS         [dfSysOS];
+	char    szSvrCD         [dfSvrCD];
+	char	szDirPath         [dfDir];
+	char	szDirPathTmp      [dfDir];
+	char	szEditor       [dfEditor];
+	char	szLocal      [dfFullPath]; 
+    char    szInfo           [dfInfo];
+	char	szMd5sum            [100];
+	char	md5sumval           [100];
+	char    szCommand           [512];                   /* Process Check용 Work*/
+	char    szDiffList        [dfDir];
+	char    szDiffRst         [dfDir];
+	char    szFileDate           [20];
+	int     nLstVer                  ;
+	int     nFileSize                ;
+	int     nRet                     ;
+	char	dummy                [50]; /* Read Buffer         */
+	
+	FILE	*DiffPtr            ;
+	FILE	*RstPtr             ;
+	CMD_INFO	  CmdInfo;
+	
+	memset(szExePgm   , 0x00, sizeof(szExePgm   ));
+	strcpy(szExePgm,argv[0]);
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));	
+		
+	if (argc < 1) {
+		sprintf(gszLogMsg,"Usage : [%s] <difflist> \n",szExePgm);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+    }
+	memset(szDiffList   , 0x00, sizeof(szDiffList   ));
+	memset(szDiffRst    , 0x00, sizeof(szDiffRst    ));
+	sprintf(szDiffList,"%s",argv[1]);
+	
+	if (access(szDiffList,F_OK) != 0) {		
+		sprintf(gszLogMsg,"[%s] Diff List File Not Exists [%s]\n",szExePgm,szDiffList);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);	
+	}
+	sprintf(szDiffRst,"%s_rst",szDiffList);
+	
+	remove(szDiffRst);
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE){
+		/*LOG*/sprintf(gszLogMsg,"[%s] Connect Error [%s]\n",szExePgm,szDiffList);
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+	 
+    memset(szSysCD   , 0x00, sizeof(szSysCD   ));
+    memset(szRsrcName, 0x00, sizeof(szRsrcName));
+    memset(szSvrIP   , 0x00, sizeof(szSvrIP   ));
+    memset(szDirPath , 0x00, sizeof(szDirPath ));
+    memset(szEditor  , 0x00, sizeof(szEditor  ));
+    memset(szItemId  , 0x00, sizeof(szItemId  ));
+           
+	sprintf(szItemId   , "%s", argv[1]);   
+	sprintf(szEditor   , "%s", argv[2]); 
+	
+	InitCmdInfo(&CmdInfo);
+
+	strcpy(CmdInfo.szAcptNo,"999999999999");
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);	
+	    
+
+	memset(gszTempPath,0x00,sizeof(gszTempPath));
+	SetTempDir("99",gszTempPath);
+		
+	
+	/*LOG*/sprintf(gszLogMsg,"[%s] 체크인 전 프로그램비교  처리 시작 [%s] \n",szExePgm,szDiffList);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+	
+	/*-----------------------------------------------------------*/
+ 	/*   File Open (DiffList File)                               */
+    /*-----------------------------------------------------------*/
+    if ((DiffPtr = fopen(szDiffList,"r")) == (FILE *) NULL) {
+    	sprintf(gszLogMsg,"[%s] DiffList File Open Fail [%s] \n",szExePgm,szDiffList);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+        exit (1);
+    }
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (Diff Result File)                            */
+    /*-----------------------------------------------------------*/
+    if ((RstPtr = fopen(szDiffRst,"w")) == (FILE *) NULL) {
+    	sprintf(gszLogMsg,"[%s] DiffList Result File Open Fail [%s] \n",szExePgm,szDiffRst);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+    	fclose (DiffPtr);
+    	fclose (RstPtr);
+        exit (1);
+    }
+    
+    while (fgets(dummy, 50, DiffPtr) != (char *)NULL) {
+	    if (strlen(dummy) == 0)	break;
+        /*-------------------------------------------------------*/
+    	/* Return Valure Truncate                                */
+        /*-------------------------------------------------------*/
+        sprintf(szItemId, "%s", left_char(dummy,12));
+        
+		EXEC SQL
+			SELECT  d.CR_SYSCD
+			       ,a.CM_SVRCD
+			       ,d.CR_RSRCCD
+			       ,d.CR_RSRCNAME
+			       ,d.CR_MD5SUM
+			       ,a.CM_SYSOS
+			       ,a.CM_SVRIP
+			       ,a.CM_PORTNO
+			       ,c.cm_info
+			       ,e.CM_DIRPATH
+			       ,a.CM_SEQNO
+			       ,D.CR_LSTVER
+			       ,d.CR_JOBCD
+			  INTO	:szSysCD
+			       ,:szSvrCD
+			       ,:szRsrcCD
+			       ,:szRsrcName
+			       ,:szMd5sum
+			       ,:szSysOS
+			  	   ,:szSvrIP
+			  	   ,:szPortNo
+			  	   ,:szInfo
+			  	   ,:szDirPathTmp
+			  	   ,:szSvrSeq
+			  	   ,:nLstVer
+			  	   ,:szJobCD
+			  FROM	CMM0031 a, CMM0038 b,CMM0036 c,CMR0020 d,CMM0070 e
+			 WHERE	d.CR_ITEMID=:szItemId
+			   AND  d.CR_SYSCD=a.CM_SYSCD
+			   AND  a.CM_SVRCD  = '01'
+			   AND  a.CM_CLOSEDT IS NULL
+			   AND	a.CM_SysCd  = b.CM_SysCd
+			   AND	a.CM_SvrCd  = b.CM_SvrCd
+			   AND	a.CM_SEQNO  = b.CM_SEQNO
+			   AND	b.CM_RsrcCD = d.CR_RSRCCD
+			   AND  B.CM_SYSCD = C.CM_SYSCD
+			   AND  B.CM_RSRCCD = C.CM_RSRCCD
+			   AND  D.CR_SYSCD = e.CM_SYSCD
+			   AND  D.CR_DSNCD = E.CM_DSNCD;
+			   	
+		if (sqlca.sqlcode != 0){
+			sprintf(gszLogMsg," [%s][%s] server info get err [%s] [%d] "
+						,szExePgm,szItemId,sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			fprintf(RstPtr, "%sSQL1\n",szItemId);
+			continue;
+		}
+		
+		NotUseDataTruncate (szSysCD, 0x20);	
+		NotUseDataTruncate (szSysOS, 0x20);	
+		NotUseDataTruncate (szSvrIP, 0x20);	
+		NotUseDataTruncate (szInfo, 0x20);		
+		NotUseDataTruncate (szSvrCD, 0x20);		
+		NotUseDataTruncate (szJobCD, 0x20);		
+		NotUseDataTruncate (szRsrcCD, 0x20);	
+		NotUseDataTruncate (szMd5sum, 0x20);
+			
+	    sprintf(szRsrcName  , "%s", trunc_char(szRsrcName  ));
+	    sprintf(szDirPathTmp, "%s", trunc_char(szDirPathTmp));	
+	    
+	    /*-----------------------------------------------------------*/
+		/*	소켓 버퍼사이즈 SET                                            */
+		/*-----------------------------------------------------------*/
+		if (Server_Buff_Size(szSysCD, szSvrCD, szSvrSeq) == FALSE) {
+		    sprintf(gszLogMsg,"[%s][%s] 서버 버퍼사이즈 조회실패 : [%s] [%s] [%d]",szExePgm,szDiffList,szSysCD, szSvrCD, szSvrSeq);
+		    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			fprintf(RstPtr, "%sBUFF\n",szItemId);
+			continue;
+		}
+		
+		nRet = ChangeVolPath(szSysCD , szSvrCD, szRsrcCD, szJobCD, szSvrSeq, szDirPathTmp, szDirPath);
+		if (nRet != 0) {
+			sprintf(gszLogMsg,"[%s][%s] ChangeVolPath Fail : [%s] [%s] [%d]",szExePgm,szDiffList,szSysCD, szSvrCD, szSvrSeq);
+		    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			fprintf(RstPtr, "%sDIRC\n",szItemId);
+			continue;	
+		}
+		
+		sprintf(szLocal,"%s/%s.%s",gszTempPath,szItemId, szEditor);	
+		if (access(szLocal,F_OK) != 0) {
+			remove(szLocal);
+		}
+		sprintf(CmdInfo.szServerIP,"%s",szSvrIP);
+		CmdInfo.nPort = szPortNo;		
+		strcpy(CmdInfo.szJobGub, "I");
+		sprintf(CmdInfo.szCommand,"%s/%s",szDirPathTmp,szRsrcName);
+		Server_Cmd_JOB(&CmdInfo);
+
+	    if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+	     	sprintf(gszLogMsg,"[%s][%s] RsrcName Info Get Err [%s] [%d] [%s][%s] "
+					,szExePgm,szItemId,szSvrIP,szPortNo,CmdInfo.szCommand,CmdInfo.szRstCond);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			fprintf(RstPtr, "%sFNON\n",szItemId);
+			continue;
+	    }	
+	    nFileSize = (int)CmdInfo.lFileSize;
+	    sprintf(szFileDate,"%s",CmdInfo.szFileDate);
+	    NotUseDataTruncate (szFileDate, 0x20);
+	    	
+	    if (nFileSize == 0) {
+			sprintf(gszLogMsg,"[%s][%s] FileSize Zero [%s] " ,szExePgm,szItemId,CmdInfo.szRemote);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			fprintf(RstPtr, "%sZERO%s;%d\n",szItemId,szFileDate,nFileSize);
+			continue;   	
+		}
+		
+	    sprintf(CmdInfo.szRemote,"%s/%s",szDirPathTmp,szRsrcName);	    
+	    sprintf(CmdInfo.szLocal,"%s",szLocal);
+	    strcpy(CmdInfo.szJobGub, "G");
+	    Server_Cmd_JOB(&CmdInfo);
+	    
+	    if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+	     	sprintf(gszLogMsg,"[%s][%s] RsrcName Info Get Err [%s] [%d] [%s][%s][%s] "
+					 ,szExePgm,szItemId,szSvrIP,szPortNo,CmdInfo.szRemote,CmdInfo.szLocal,CmdInfo.szRstCond);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			fprintf(RstPtr, "%sFGET%s;%d\n",szItemId,szFileDate,nFileSize);
+			continue;
+	    }
+		
+	    if (MD5SUM(szLocal, md5sumval) != 0) {
+	     	sprintf(gszLogMsg,"[%s][%s] RsrcName MD5SUM 추출실패 [%s] " ,szExePgm,szItemId,szLocal);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			fprintf(RstPtr, "%sMDER%s;%d\n",szItemId,szFileDate,nFileSize);
+			continue;   
+	    }
+	    remove(szLocal);
+	    	
+	    if (nLstVer == 0) {
+			fprintf(RstPtr, "%s0000%s;%d\n",szItemId,szFileDate,nFileSize);
+			continue;	
+		}	
+	    if (strcmp(szMd5sum,md5sumval) != 0) {
+	     	sprintf(gszLogMsg,"[%s] [%s] RsrcName MD5SUM 불일치 [파일변경] [%s][%s][%s] ",szExePgm,szItemId,szLocal,szMd5sum,md5sumval);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			fprintf(RstPtr, "%s0000%s;%d\n",szItemId,szFileDate,nFileSize);
+			continue;	    
+	    } else {
+	     	sprintf(gszLogMsg,"[%s][%s] RsrcName MD5SUM 일치 [파일변경없음] [%s] ",szExePgm,szItemId,szLocal);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			fprintf(RstPtr, "%sSAME%s;%d\n",szItemId,szFileDate,nFileSize);
+			continue;
+	    }
+	}
+	fclose (DiffPtr);
+    fclose (RstPtr);
+    
+    remove(szDiffList);
+    /*LOG*/sprintf(gszLogMsg,"[%s] 체크인 전 프로그램비교  처리 완료 [%s] \n",szExePgm,szDiffList);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+	
+    exit(0);	
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

@@ -1,0 +1,279 @@
+autoscan: warning: missing AC_CHECK_FUNCS([bzero]) wanted by: 
+	svrsrc/lanapi.c:538
+autoscan: warning: missing AC_CHECK_FUNCS([gethostbyname]) wanted by: 
+	ftpsrc/ftplib.c:592
+autoscan: warning: missing AC_CHECK_FUNCS([gethostname]) wanted by: 
+	tarcom/gethostname.c:26
+	inc/compat.h:85
+autoscan: warning: missing AC_CHECK_FUNCS([gettimeofday]) wanted by: 
+	svrsrc/util.c:235
+autoscan: warning: missing AC_CHECK_FUNCS([inet_ntoa]) wanted by: 
+	svrsrc/lanapi.c:350
+	svrsrc/lanapi.c:488
+autoscan: warning: missing AC_CHECK_FUNCS([isascii]) wanted by: 
+	svrsrc/util.c:298
+autoscan: warning: missing AC_CHECK_FUNCS([memset]) wanted by: 
+	tarsrc/libtar_list.c:171
+	tarsrc/append.c:84
+	tarsrc/append.c:193
+	tarsrc/append.c:246
+	tarsrc/tarutil.c:169
+	tarsrc/tarutil.c:176
+	tarsrc/tarutil.c:209
+	tarsrc/tarutil.c:210
+	tarsrc/tarutil.c:211
+	tarsrc/tarutil.c:212
+	tarsrc/tarutil.c:213
+	tarsrc/tarutil.c:248
+	tarsrc/tarutil.c:249
+	tarsrc/tarutil.c:250
+	tarsrc/tarutil.c:283
+	tarsrc/tarutil.c:284
+	tarsrc/tarutil.c:285
+	tarsrc/tarutil.c:341
+	tarsrc/tarutil.c:353
+	tarsrc/tarutil.c:354
+	tarsrc/tarutil.c:355
+	tarsrc/tarutil.c:394
+	tarsrc/tarutil.c:416
+	tarsrc/tarutil.c:422
+	tarsrc/tarutil.c:427
+	tarsrc/tarutil.c:428
+	tarsrc/tarutil.c:442
+	tarsrc/tarutil.c:474
+	tarsrc/tarutil.c:514
+	tarsrc/tarutil.c:527
+	tarsrc/tarutil.c:625
+	tarsrc/tarutil.c:637
+	tarsrc/tarutil.c:638
+	tarsrc/tarutil.c:647
+	tarsrc/tarutil.c:674
+	tarsrc/tarutil.c:692
+	tarsrc/tarutil.c:693
+	tarsrc/tarutil.c:759
+	tarsrc/tarutil.c:771
+	tarsrc/tarutil.c:772
+	tarsrc/tarutil.c:773
+	tarsrc/tarutil.c:810
+	tarsrc/tarutil.c:828
+	tarsrc/tarutil.c:829
+	tarsrc/tarutil.c:846
+	tarsrc/tarutil.c:852
+	tarsrc/tarutil.c:860
+	tarsrc/tarutil.c:872
+	tarsrc/tarutil.c:878
+	tarsrc/tarutil.c:884
+	tarsrc/tarutil.c:890
+	tarsrc/tarutil.c:895
+	tarsrc/tarutil.c:961
+	tarsrc/block.c:105
+	tarsrc/block.c:297
+	tarsrc/block.c:348
+	ftpsrc/ftplib.c:199
+	ftpsrc/ftplib.c:213
+	ftpsrc/ftplib.c:663
+	ftpsrc/ftplib.c:683
+	ftpsrc/ftplib.c:753
+	ftpsrc/ftplib.c:828
+	ftpsrc/ftplib.c:886
+	ftpsrc/ftplib.c:911
+	ftpsrc/ftplib.c:1097
+	ftpsrc/ftplib.c:1209
+	ftpsrc/ftplib.c:1236
+	ftpsrc/ftplib.c:1264
+	ftpsrc/ftplib.c:1292
+	ftpsrc/ftplib.c:1308
+	ftpsrc/ftplib.c:1341
+	ftpsrc/ftplib.c:1365
+	svrsrc/ecams_svr.c:93
+	svrsrc/ecams_svr.c:107
+	svrsrc/ecams_svr.c:164
+	svrsrc/ecams_svr.c:304
+	svrsrc/ecams_svr.c:384
+	svrsrc/ecams_svr.c:438
+	svrsrc/ecams_svr.c:451
+	svrsrc/ecams_svr.c:581
+	svrsrc/ecams_svr.c:587
+	svrsrc/ecams_svr.c:618
+	svrsrc/ecams_svr.c:656
+	svrsrc/ecams_svr.c:667
+	svrsrc/ecams_svr.c:680
+	svrsrc/ecams_svr.c:713
+	svrsrc/ecams_svr.c:721
+	svrsrc/ecams_svr.c:756
+	svrsrc/ecams_svr.c:796
+	svrsrc/ecams_svr.c:797
+	svrsrc/ecams_svr.c:811
+	svrsrc/ecams_svr.c:846
+	svrsrc/ecams_svr.c:850
+	svrsrc/ecams_svr.c:854
+	svrsrc/ecams_svr.c:868
+	svrsrc/ecams_svr.c:869
+	svrsrc/ecams_svr.c:895
+	svrsrc/ecams_svr.c:939
+	svrsrc/ecams_svr.c:973
+	svrsrc/ecams_svr.c:981
+	svrsrc/ecams_svr.c:1009
+	svrsrc/ecams_svr.c:1044
+	svrsrc/ecams_svr.c:1045
+	svrsrc/ecams_svr.c:1067
+	svrsrc/ecams_svr.c:1068
+	svrsrc/ecams_svr.c:1101
+	svrsrc/ecams_svr.c:1122
+	svrsrc/ecams_svr.c:1123
+	svrsrc/strcvt.c:269
+	svrsrc/strcvt.c:289
+	svrsrc/lanapi.c:226
+	svrsrc/lanapi.c:251
+	svrsrc/lanapi.c:306
+	svrsrc/lanapi.c:381
+	svrsrc/lanapi.c:424
+	svrsrc/lanapi.c:457
+	svrsrc/util.c:144
+	svrsrc/util.c:172
+	svrsrc/util.c:194
+	svrsrc/util.c:214
+	svrsrc/util.c:237
+	svrsrc/util.c:278
+autoscan: warning: missing AC_CHECK_FUNCS([mkdir]) wanted by: 
+	tarsrc/tutil.c:102
+	tarsrc/extract.c:464
+autoscan: warning: missing AC_CHECK_FUNCS([mkfifo]) wanted by: 
+	tarsrc/extract.c:518
+autoscan: warning: missing AC_CHECK_FUNCS([select]) wanted by: 
+	svrsrc/lanapi.c:610
+	svrsrc/util.c:341
+	svrsrc/util.c:371
+	svrsrc/util.c:393
+autoscan: warning: missing AC_CHECK_FUNCS([socket]) wanted by: 
+	ftpsrc/ftplib.c:596
+	ftpsrc/ftplib.c:724
+	svrsrc/lanapi.c:418
+	svrsrc/lanapi.c:529
+autoscan: warning: missing AC_CHECK_FUNCS([strchr]) wanted by: 
+	tarsrc/encode.c:94
+	ftpsrc/ftplib.c:1043
+	tarcom/fnmatch.c:120
+	tarcom/fnmatch.c:125
+	svrsrc/util.c:108
+autoscan: warning: missing AC_CHECK_FUNCS([strdup]) wanted by: 
+	tarsrc/decode.c:38
+	tarsrc/decode.c:42
+	tarsrc/libtar_list.c:380
+	tarsrc/encode.c:88
+	tarsrc/encode.c:126
+autoscan: warning: missing AC_CHECK_FUNCS([strerror]) wanted by: 
+	tarsrc/tarutil.c:27
+	tarsrc/tarutil.c:43
+	tarsrc/tarutil.c:53
+	tarsrc/tarutil.c:61
+	tarsrc/tarutil.c:83
+	tarsrc/tarutil.c:96
+	tarsrc/tarutil.c:110
+	tarsrc/tarutil.c:132
+	tarsrc/tarutil.c:141
+	tarsrc/tarutil.c:150
+	tarsrc/extract.c:61
+	tarsrc/extract.c:68
+autoscan: warning: missing AC_CHECK_FUNCS([strspn]) wanted by: 
+	svrsrc/strcvt.c:83
+autoscan: warning: missing AC_CHECK_FUNCS([strstr]) wanted by: 
+	ftpsrc/ftplib.c:848
+	svrsrc/strcvt.c:57
+autoscan: warning: missing AC_CHECK_FUNCS([uname]) wanted by: 
+	tarcom/gethostname.c:29
+autoscan: warning: missing AC_CHECK_FUNCS([utime]) wanted by: 
+	tarsrc/extract.c:75
+autoscan: warning: missing AC_FUNC_CHOWN wanted by: 
+	tarsrc/extract.c:64
+autoscan: warning: missing AC_FUNC_CLOSEDIR_VOID wanted by: 
+	tarsrc/wrapper.c:149
+	tarcom/glob.c:640
+autoscan: warning: missing AC_FUNC_FORK wanted by: 
+	svrsrc/ecams_svr.c:397
+autoscan: warning: missing AC_FUNC_LSTAT wanted by: 
+	tarsrc/wrapper.c:133
+	tarsrc/append.c:72
+	tarsrc/extract.c:107
+	tarcom/glob.c:796
+autoscan: warning: missing AC_FUNC_LSTAT_FOLLOWS_SLASHED_SYMLINK wanted by: 
+	tarsrc/wrapper.c:133
+	tarsrc/append.c:72
+	tarsrc/extract.c:107
+	tarcom/glob.c:796
+autoscan: warning: missing AC_FUNC_MALLOC wanted by: 
+	tarsrc/libtar_list.c:162
+	tarsrc/libtar_list.c:164
+	tarsrc/block.c:126
+	tarsrc/block.c:171
+	tarcom/glob.c:673
+	tarcom/glob.c:690
+	tarcom/strdup.c:58
+	svrsrc/ecams_svr.c:293
+	svrsrc/ecams_svr.c:579
+	svrsrc/ecams_svr.c:586
+	svrsrc/ecams_svr.c:865
+	svrsrc/ecams_svr.c:866
+	svrsrc/ecams_svr.c:1039
+	svrsrc/ecams_svr.c:1040
+	svrsrc/lanapi.c:91
+	svrsrc/lanapi.c:211
+	svrsrc/lanapi.c:287
+autoscan: warning: missing AC_FUNC_MEMCMP wanted by: 
+	tarsrc/tutil.c:42
+	tarsrc/tutil.c:50
+	ftpsrc/ftplib.c:231
+	ftpsrc/ftplib.c:234
+	ftpsrc/ftplib.c:401
+	ftpsrc/ftplib.c:404
+	ftpsrc/ftplib.c:405
+	ftpsrc/ftplib.c:856
+	ftpsrc/ftplib.c:862
+	ftpsrc/ftplib.c:967
+	ftpsrc/ftplib.c:975
+	ftpsrc/ftplib.c:993
+	ftpsrc/ftplib.c:1011
+	ftpsrc/ftplib.c:1057
+	ftpsrc/ftplib.c:1114
+	ftpsrc/ftplib.c:1120
+	svrsrc/ecams_svr.c:96
+autoscan: warning: missing AC_FUNC_REALLOC wanted by: 
+	tarcom/glob.c:672
+autoscan: warning: missing AC_FUNC_SELECT_ARGTYPES wanted by: 
+	svrsrc/lanapi.c:610
+	svrsrc/util.c:341
+	svrsrc/util.c:371
+	svrsrc/util.c:393
+autoscan: warning: missing AC_FUNC_STAT wanted by: 
+	ftpsrc/ftplib.c:1133
+	tarcom/glob.c:810
+	svrsrc/ecams_svr.c:780
+	svrsrc/util.c:165
+autoscan: warning: missing AC_FUNC_UTIME_NULL wanted by: 
+	tarsrc/extract.c:75
+autoscan: warning: missing AC_FUNC_VPRINTF wanted by: 
+	ftpsrc/ftplib.c:667
+autoscan: warning: missing AC_FUNC_WAIT3 wanted by: 
+	svrsrc/ecams_svr.c:217
+autoscan: warning: missing AC_REPLACE_FNMATCH wanted by: 
+	tarsrc/wrapper.c:35
+	tarcom/fnmatch.c:80
+	tarcom/fnmatch.c:132
+autoscan: warning: missing AC_TYPE_SIGNAL wanted by: 
+	svrsrc/ecams_svr.c:228
+	svrsrc/ecams_svr.c:232
+	svrsrc/ecams_svr.c:234
+	svrsrc/ecams_svr.c:238
+	svrsrc/ecams_svr.c:239
+	svrsrc/ecams_svr.c:240
+	svrsrc/ecams_svr.c:241
+	svrsrc/ecams_svr.c:242
+	svrsrc/ecams_svr.c:243
+	svrsrc/ecams_svr.c:268
+	svrsrc/ecams_svr.c:270
+	svrsrc/ecams_svr.c:271
+	svrsrc/ecams_svr.c:272
+	svrsrc/ecams_svr.c:273
+	svrsrc/ecams_svr.c:274
+	svrsrc/ecams_svr.c:275
+	svrsrc/ecams_svr.c:276

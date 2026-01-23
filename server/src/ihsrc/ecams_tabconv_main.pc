@@ -1,0 +1,129 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_tabconv_main.pc                        │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 이행 처리 MAIN                               │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 10. 02                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		Structure for VARRAW                                     */
+/*---------------------------------------------------------------*/
+typedef struct
+{
+	short len;
+	char  arr[100];
+} vr;
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*      계정/정보계 기존 버전자료 이행 처리  M A I N             */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char	szItemID              [dfItemID];
+char	szSysCmd            [dfFullPath];
+char	szSysCD                [dfSysCD];
+int 	retval                          ;
+CMD_INFO	CmdInfo                     ;
+
+	
+	if (argc != 2) {
+		fprintf(stderr, "Usage : %s <TABLENAME> \n", argv[0]);
+		exit (1);
+	}
+	
+    /*-----------------------------------------------------------*/
+    /*   Signal Define			                                 */
+    /*-----------------------------------------------------------*/
+    DefineSignal ();
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		fprintf(stderr, "DB 연결 않됨 \n");
+		exit(1);
+	}
+
+	/*-----------------------------------------------------------*/
+	/*	이행대상 목록 작성                                       */
+	/*-----------------------------------------------------------*/
+	EXEC SQL DECLARE IH_Rsrc CURSOR FOR
+		SELECT  CM_SYSCD
+		  FROM  COVM_SCM.CMM0030 ;
+		   
+	EXEC SQL open  IH_Rsrc;
+    while (1) {
+		EXEC SQL fetch IH_Rsrc
+			INTO  :szSysCD;
+
+		NotUseDataTruncate (szSysCD, 0x20);
+
+		if (sqlca.sqlcode == 1403)	break;
+			
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			break;
+		}
+
+		sprintf(szSysCmd, "procck ecams_tabconv");
+		while (1) {
+			retval = system(szSysCmd) / 256;
+			if (retval < 10)	break;
+		}
+				
+		sprintf(szSysCmd, "tabih.sh %s %s &", argv[1], szSysCD);
+		retval = system(szSysCmd) / 256;
+	}
+	EXEC SQL close IH_Rsrc;
+	
+	EXEC SQL COMMIT WORK RELEASE;
+	
+	sprintf(szSysCmd, "ps -ef | grep ecams_tabconv | grep %s | grep -v grep | grep -v sh | wc -l", argv[1]);
+	while (1) {
+		retval = system(szSysCmd) / 256;
+		if (retval == 0)	break;
+	}
+	
+	exit (0);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

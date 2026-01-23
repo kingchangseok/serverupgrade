@@ -1,0 +1,505 @@
+
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_diffrst.pc                             │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 소스비교 결과파일 작성                       │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2007. 03. 13                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL BEGIN DECLARE SECTION;
+  char			gConnStr     [50];    /* Connect String          */
+  int           gPid             ;    /* 처리 Process ID         */
+EXEC SQL END DECLARE SECTION;
+
+
+/* 포함부 */
+EXEC SQL INCLUDE SQLCA;
+
+char   **gEnvp;                       /* Parameter죵료용 Pointer */
+
+
+int    Process_COMPARE (char * OLDFile,char * NEWFile,char * RsrcName);
+
+/*****************************************************************/
+/*                                                               */
+/*     재처리대상 조회 및 자동재처리  M A I N                    */
+/*                                                               */
+/*****************************************************************/
+int  	main(int argc, char **argv, char **envp)
+{
+char	szAcptNo      [21];
+int		szSerNo           ;
+char  systime       [16];
+char	sysdate       [16];
+char	SysCmd       [512];
+int		retval            ;
+char 	szTmpPath    [512];            /*Log File Name           */
+char 	szTmpPath1   [512];            /*Log File Name           */
+char 	szTmpPath2   [512];            /*Log File Name           */
+FILE	*LOGPTR           ;
+char	szTmpPath3	 [512];
+char	szTmpPath4	 [512];
+int		befVer;
+
+char	szSysCD[6];
+char	szDsnCD[6];
+char	szRsrcName[512];
+char  szItemId[13];
+int		szVer;
+char	szUserID[50];
+char	szSorcName[6];
+char	iconvFileName[512];
+char  szConvFlag[2];
+
+    gEnvp = envp;
+    gPid = getpid ();
+
+    if ( argc < 5 ) {
+        fprintf(stderr, "\nUSAGE : %s <ItemId> <버전> <사용자번호> <ACPTNO> \n\n", argv[0]);
+        exit (0);
+		}
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	memset(gConnStr, 0x00, sizeof(gConnStr));
+	sprintf(gConnStr, "%s/%s@%s", getenv("DBUSER"), getenv("DBPASS"), getenv("DBCONN"));
+	EXEC SQL CONNECT :gConnStr;
+	  
+  if (sqlca.sqlcode != 0) {
+      printf("CONNECT ERROR \n");
+      EXEC SQL ROLLBACK WORK RELEASE;
+      exit(1);
+  }
+
+	DefineSignal ();
+	
+	EXEC SQL
+		SELECT  CM_PATH
+		  INTO  :szTmpPath
+		  FROM  CMM0012
+		 WHERE  CM_STNO = 'ECAMS'
+		   AND  CM_PATHCD = '99';
+		   
+	if (sqlca.sqlcode != 0)
+		memset(szTmpPath, 0x00, sizeof(szTmpPath));
+		
+	NotUseDataTruncate (szTmpPath, 0x20);
+		
+	strcpy(szItemId,argv[1]);
+	szVer = atoi(argv[2]);
+	strcpy(szUserID,argv[3]);
+		
+	
+	sprintf(szTmpPath1, "%s/%s.bef", szTmpPath, szUserID);
+	sprintf(szTmpPath2, "%s/%s"    , szTmpPath, szUserID);
+	
+
+	
+	sprintf(szTmpPath4, "%s/%s.%d"    , szTmpPath, szUserID,szVer );
+	
+	if (argc == 5 && strlen(argv[4]) > 0){
+		strcpy(szAcptNo,argv[4]);
+		sprintf(szTmpPath3, "%s/%s.%s"    , szTmpPath, szUserID,szAcptNo);
+		
+		sprintf(SysCmd,"FileRead_cmr0027 '%s' '%s' '%s' ",szAcptNo, szItemId ,szTmpPath3);
+		
+		printf("SysCmd = [%s]\n", SysCmd);
+		system(SysCmd);
+		
+		if (access(szTmpPath3, F_OK) != 0){
+			exit (3);
+		}
+		
+		memset(iconvFileName,0x00,sizeof(iconvFileName));
+		memset(SysCmd,0x00,sizeof(SysCmd));
+		sprintf(iconvFileName,"%s.iconv", szTmpPath3);
+		
+		/*sprintf(SysCmd,"iconv -f ko_KR-euc -t ko_KR-UTF-8 %s > %s ",szTmpPath3,iconvFileName);*/
+		sprintf(SysCmd,"iconv -f ko_KR-UTF-8 -t ko_KR-euc %s > %s ",szTmpPath3,iconvFileName);
+		retval = system(SysCmd)/256;
+		
+		if (retval == 0){
+			sprintf(SysCmd,"mv %s %s",iconvFileName,szTmpPath3);
+			system(SysCmd);
+		}
+		else{
+			remove(iconvFileName);
+		}
+		
+				
+	}
+	else{
+		if (szVer-1 == 0){
+			EXEC SQL
+				SELECT cr_acptno
+				into :szAcptNo
+				from cmr0025
+				where cr_itemid = :szItemId
+				and	   cr_ver = :szVer;
+					
+					
+			if (sqlca.sqlcode != 0){
+				exit(1);
+			}
+			
+			NotUseDataTruncate (szAcptNo, 0x20);
+			
+			EXEC SQL
+				select CR_ver 
+				into :befVer
+				from cmr0021
+				where  cr_itemid = :szItemId
+				and    cr_acptno <> :szAcptNo
+				and    rownum = 1
+				order by cr_prcdate desc;
+				
+			if (sqlca.sqlcode != 0){
+				exit(2);
+			}
+			
+		}
+		else{
+			befVer = szVer -1;
+		}
+		sprintf(szTmpPath3, "%s/%s.%d"    , szTmpPath, szUserID,befVer);
+		
+		sprintf(SysCmd, "FileRead_cmr0025 '%s' '%s' %d", szItemId, szTmpPath3, befVer);
+	
+		printf("SysCmd = [%s]\n", SysCmd);
+		
+		system(SysCmd);
+		
+		if (access(szTmpPath3, F_OK) != 0){
+			exit (3);
+		}
+		
+		memset(iconvFileName,0x00,sizeof(iconvFileName));
+		memset(SysCmd,0x00,sizeof(SysCmd));
+		sprintf(iconvFileName,"%s.iconv", szTmpPath3);
+		
+		/*sprintf(SysCmd,"iconv -f ko_KR-euc -t ko_KR-UTF-8 %s > %s ",szTmpPath3,iconvFileName);*/
+		sprintf(SysCmd,"iconv -f ko_KR-UTF-8 -t ko_KR-euc %s > %s ",szTmpPath3,iconvFileName);
+				
+		retval = system(SysCmd)/256;
+		
+		if (retval == 0){
+			sprintf(SysCmd,"mv %s %s",iconvFileName,szTmpPath3);
+			system(SysCmd);
+		}
+		else{
+			remove(iconvFileName);
+		}		
+		
+		
+	}
+	
+
+
+	sprintf(SysCmd, "FileRead_cmr0025 '%s' '%s' '%s' '%s' %d", szSysCD, szDsnCD,szRsrcName, szTmpPath4, szVer);
+	
+	printf("SysCmd = [%s]\n", SysCmd);
+	system(SysCmd);
+	
+	if (access(szTmpPath4, F_OK) != 0){
+		exit (4);
+	}
+	
+	
+	memset(iconvFileName,0x00,sizeof(iconvFileName));
+	memset(SysCmd,0x00,sizeof(SysCmd));
+	sprintf(iconvFileName,"%s.iconv", szTmpPath4);
+	
+	/*sprintf(SysCmd,"iconv -f ko_KR-euc -t ko_KR-UTF-8 %s > %s ",szTmpPath3,iconvFileName);*/
+	sprintf(SysCmd,"iconv -f ko_KR-UTF-8 -t ko_KR-euc %s > %s ",szTmpPath3,iconvFileName);
+		
+	
+	retval = system(SysCmd)/256;
+	
+	if (retval == 0){
+		sprintf(SysCmd,"mv %s %s",iconvFileName,szTmpPath4);
+		system(SysCmd);
+	}
+	else{
+		remove(iconvFileName);
+	}	
+	
+	
+	if (argc == 5 && strlen(argv[4]) > 0){
+		sprintf(SysCmd, "diff -C10 '%s' '%s' > '%s'",szTmpPath4,szTmpPath3,szTmpPath1);
+	}
+	else{
+		sprintf(SysCmd, "diff -C10 '%s' '%s' > '%s'",szTmpPath3,szTmpPath4,szTmpPath1);
+	}
+	
+	system(SysCmd);
+	
+	if (access(szTmpPath1, F_OK) != 0){
+		exit (5);
+	}	
+	
+	printf("COMPARE START ... \n");
+	Process_COMPARE (szTmpPath1, szTmpPath2, szRsrcName);
+
+	remove (szTmpPath1);
+	remove (szTmpPath3);
+	remove (szTmpPath4);
+	exit (0);
+}
+
+/*---------------------------------------------------------------*/
+/*		자원의 변경내용 비교 (diff) 처리                         */
+/*---------------------------------------------------------------*/
+int    Process_COMPARE (OLDFile, NEWFile, RsrcName)
+char	*OLDFile  	;
+char	*NEWFile   	;
+char	*RsrcName  	;
+{
+FILE	*OLDPtr			 	  ;
+FILE 	*NEWPtr			 	  ;
+char    dummy           [1024];       /* Read Buffer             */
+char    aftdummy        [1024];       /* Read Buffer             */
+char	LeftStr   		  [20];
+char	RightStr  		  [20];
+char	DiffCmd   		   [5];
+int 	Line1     		      ;
+int 	Line2     		      ;
+int 	Line3     		      ;
+int 	Line4     		      ;
+int		nRet1	              ;
+char	new[3+1], pr[1+1];
+int	read_cnt=0,sw=0,i=0,j=0,st=0,cnt=0;
+int	insert=0,delete=0,update=0,len=0;
+
+
+    /*-----------------------------------------------------------*/
+ 	/*   File Open (OLD/NEW File)                                */
+    /*-----------------------------------------------------------*/
+    if ((OLDPtr = fopen(OLDFile,"r")) == (FILE *) NULL)
+        return (2);
+
+    if ((NEWPtr = fopen(NEWFile ,"w")) == (FILE *) NULL) {
+    	fclose (OLDPtr);
+        return (3);
+    }
+	fprintf(NEWPtr,"=============================================================================\n");
+	
+    while (1) {
+    	memset(aftdummy,0x00,	sizeof(aftdummy));
+		memset(dummy,	0x00,	sizeof(dummy));
+
+		if (fgets(dummy, sizeof(dummy), OLDPtr) == (char *) NULL)
+		{
+			break;
+		}
+
+		j	=	0;
+		for (i=0; i < sizeof(dummy); i++)
+		{
+			if (dummy[i] == 0x09)	/* tab 값 */
+			{
+				memcpy(aftdummy+j,	"   ",	3);
+				j = j + 3;
+			}
+			else
+			{
+				aftdummy[j]	= dummy[i];
+				j++;
+			}
+		}
+
+		if (memcmp(aftdummy, "No differences encountered", 26) == 0)
+		{
+			printf("변경된 내용이 없습니다\n");
+			printf("변경된 내용이 없습니다\n");
+			printf("변경된 내용이 없습니다\n");
+			fprintf(NEWPtr,"변경된 내용이 없습니다\n");
+			break;
+		}
+		
+		read_cnt++;
+
+		if (read_cnt == 1)
+		{
+			if (memcmp(new,	"new",	3) == 0)
+			{
+				fprintf(NEWPtr,"변경전 : 신규PROGRAM입니다\n"); continue;
+			}
+			else
+			{
+				fprintf(NEWPtr,"변경전 : %s", aftdummy+4);	continue;
+			}
+		}
+ 
+		if (read_cnt == 2)
+		{
+			fprintf(NEWPtr,"변경후 : %s", aftdummy+4);	continue;
+		}
+
+		if (memcmp(aftdummy,"*** ", 4) == 0)
+		{
+			sw	=	1;		fprintf(NEWPtr,"%s",aftdummy);	continue;
+		}
+
+		if (memcmp(aftdummy,"--- ", 4) == 0)
+		{
+			sw	=	2;		fprintf(NEWPtr,"%s",aftdummy);	continue;
+		}
+
+		if (memcmp(aftdummy,"***************", 15) == 0)
+		{
+			fprintf(NEWPtr,"=============================================================================\n");
+
+			continue;
+		}
+		/*
+		if (pr[0] == '1')
+		{
+			switch(aftdummy[0])
+			{
+				case	'!':
+				{
+					aftdummy[0]	=	' ';
+					if (memcmp(new,	"new",	3) == 0)
+					{
+						fprintf(NEWPtr,"신  규:%.125s",aftdummy);
+					}
+					else
+					{
+						if (sw == 1)	
+						{
+							fprintf(NEWPtr,"수정전:%.125s",aftdummy);
+						}
+	
+						if (sw == 2)	
+						{
+							fprintf(NEWPtr,"변  경:%.125s",aftdummy);
+							update++;
+						}
+					}
+				}
+				break;
+
+				case	'+':
+				{
+					aftdummy[0]	=	' ';
+					if (memcmp(new,	"new",	3) == 0)
+					{
+						fprintf(NEWPtr,"신  규:%.125s",aftdummy);
+					}
+					else
+					{
+						fprintf(NEWPtr,"추  가:%.125s",aftdummy);
+						insert++;
+					}
+				}
+				break;
+
+				case	'-':
+				{
+					aftdummy[0]	=	' ';
+					fprintf(NEWPtr,"삭  제:%.125s",aftdummy);
+					delete++;
+				}
+				break;
+
+				default:
+				{
+					fprintf(NEWPtr,"       %.125s",aftdummy);
+				}
+			}
+
+			if (strlen(aftdummy) > 125)
+			{
+				for (cnt=125; cnt < strlen(aftdummy); cnt+=125)
+				{
+					fprintf(NEWPtr,"\n -     %.125s",aftdummy+cnt);
+				}
+			}
+		}
+		else
+		{
+		*/
+		switch(aftdummy[0])
+		{
+			case	'!':
+			{
+				aftdummy[0]	=	' ';
+				if (sw == 1)	
+				{
+					fprintf(NEWPtr,"수정전:%.70s",aftdummy);
+				}
+
+				if (sw == 2)	
+				{
+					fprintf(NEWPtr,"변  경:%.70s",aftdummy);
+					update++;
+				}
+			}
+			break;
+
+			case	'+':
+			{
+				aftdummy[0]	=	' ';
+				if (memcmp(new,	"new",	3) == 0)
+				{
+					fprintf(NEWPtr,"신  규:%.70s",aftdummy);
+				}
+				else
+				{
+					fprintf(NEWPtr,"추  가:%.70s",aftdummy);
+					insert++;
+				}
+			}
+			break;
+
+			case	'-':
+			{
+				aftdummy[0]	=	' ';
+				fprintf(NEWPtr,"삭  제:%.70s",aftdummy);
+				delete++;
+			}
+			break;
+
+			default:
+			{
+				fprintf(NEWPtr,"       %.70s",aftdummy);
+			}
+		}
+
+		if (strlen(aftdummy) > 70)
+		{
+			for (cnt=70; cnt < strlen(aftdummy); cnt+=70)
+			{
+				fprintf(NEWPtr,"\n -     %.70s",aftdummy+cnt);
+			}
+		}
+	/*	}*/
+	}
+	fprintf(NEWPtr,"=============================================================================\n");
+	fprintf(NEWPtr,"\n[수정내용:%s] ◎삭제:%4d Line  ◎추가:%4d Line  ◎변경:%4d Line\n",RsrcName,delete,insert,update);	
+	fprintf(NEWPtr,"=============================================================================\n");
+	
+	fclose (OLDPtr);
+	fclose (NEWPtr);
+	return (0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

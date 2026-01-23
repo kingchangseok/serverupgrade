@@ -1,0 +1,160 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_acct_verfile.pc                        │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 신청건 처리완료 시 버전파일 작성             │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 30                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+void	Process_VerFile	(char *pAcptNo, char *pRstCond);
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Process_SYSUP                                    */
+/*	Action    : 신청건 처리완료 시 버전파일 작성                 */
+/*	Parameter : pAcptNo   : 신청번호                             */
+/*              pRstCond  : 처리결과                             */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	Process_VerFile	( char *pAcptNo
+						, char *pRstCond
+						)
+{
+char	szSysCD                [dfSysCD];
+char	szDsnCD                [dfDsnCD];
+char	szRsrcName          [dfRsrcName];
+int		szVersion                       ;
+char	szReqFile           [dfFullPath];
+char	szVerFile           [dfFullPath];
+char	szItemID           	  [dfItemID];
+char	szReqPath                [dfDir];
+char	szCommand           [dfFullPath];
+int 	szSerNo                         ;
+int 	nTotCnt                         ;
+int 	nErrCnt                         ;
+int 	nSuccCnt                        ;
+int 	errcnt0020                      ;
+int 	retval                          ;
+
+
+	/*-----------------------------------------------------------*/
+	/*	신청건별 신청프로그램 디렉토리 작성                      */
+	/*-----------------------------------------------------------*/
+	memset(szReqPath, 0x00, sizeof(szReqPath));
+	SetTempDir("77", szReqPath);
+	NotUseDataTruncate (szReqPath, 0x20);
+	strcat(szReqPath, pAcptNo);
+
+	/*-----------------------------------------------------------*/
+	/*	건수 작성용 변수 초기화                                  */
+	/*-----------------------------------------------------------*/
+	nTotCnt = nErrCnt = nSuccCnt = 0;
+
+	/*-----------------------------------------------------------*/
+	/*	신청건의 배포파일을 버전관리파일로 변경                  */
+	/*-----------------------------------------------------------*/
+	EXEC SQL DECLARE VerFile  CURSOR FOR
+		SELECT  DISTINCT
+		        a.CR_SERNO
+		      , a.CR_SYSCD
+		      , a.CR_RSRCNAME
+		      , a.CR_DSNCD
+		      , a.CR_ITEMID
+		      , a.CR_VERSION
+		  FROM  CMR1010 a
+		      , CMM0036 b
+		 WHERE  a.CR_ACPTNO = :pAcptNo
+		   AND  a.CR_SYSCD  = b.CM_SYSCD
+		   AND  a.CR_RSRCCD = b.CM_RSRCCD
+		   AND  a.CR_STATUS != '3'
+		   AND  SUBSTR(b.CM_INFO, 12, 1) = '1';
+
+	EXEC SQL open  VerFile;
+	errcnt0020 = 0;
+	while(1) {
+		EXEC SQL FETCH  VerFile
+			INTO  :szSerNo
+				, :szSysCD
+				, :szRsrcName
+				, :szDsnCD
+				, :szItemID
+				, :szVersion;
+
+		if (sqlca.sqlcode == 1403) 	break;
+		if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1405) {
+			sprintf(gszLogMsg, "버전파일작성 DB FETCH ERROR : [%s] [%d] [%s]", pAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			break;
+		}
+
+		NotUseDataTruncate (szSysCD   , 0x20);
+		NotUseDataTruncate (szRsrcName, 0x20);
+		NotUseDataTruncate (szDsnCD   , 0x20);
+		NotUseDataTruncate (szItemID  , 0x20);
+
+		nTotCnt++;
+
+		sprintf(szReqFile, "%s/%s.%s.%d.zip.gz", szReqPath, szRsrcName, pAcptNo, szSerNo);
+		if (FileSizeInf(szReqFile) <= 0) {
+			sprintf(gszLogMsg, "[%s] 버전파일작성 파일오류 : [%s]", pAcptNo, szReqFile);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			nErrCnt++;
+			continue;
+		}
+
+		sprintf(szVerFile, "%s/%s/%s/%s", gszBackPath, szSysCD, szDsnCD, szItemID);
+		if (access(szVerFile, F_OK) != 0)
+			Local_Dir_Make(szVerFile);
+
+		sprintf(szVerFile, "%s/%s/%s/%s/%s.%d.zip.gz", gszBackPath, szSysCD, szDsnCD, szItemID, szRsrcName, szVersion);
+		sprintf(szCommand, "cp %s %s", szReqFile, szVerFile);
+		retval = system (szCommand) / 256;
+		if (retval == 0) {
+			sprintf(gszLogMsg, "[%s] 버전파일작성 성공 : [%s]", pAcptNo, szCommand);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			nSuccCnt++;
+		}
+		else {
+			sprintf(gszLogMsg, "[%s] 버전파일작성 오류 : [%s]", pAcptNo, szCommand);
+			eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+			nErrCnt++;
+		}
+	}
+	EXEC SQL close VerFile;
+
+	sprintf(gszLogMsg, "[%s] 버전파일작성 완료 : 총건수 : %d건, 성공 : %d건, 오류: %d건", pAcptNo, nTotCnt, nSuccCnt, nErrCnt);
+	eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+
+	strcpy(pRstCond, "0000");
+
+	return;
+
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

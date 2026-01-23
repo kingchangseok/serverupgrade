@@ -1,0 +1,144 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ PFHttp_List.pc                               │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ProFrame 체크인대상 프로그램 목록 작성       │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2008. 01. 19                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+FILE *fp;
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*		ProFrame 체크인대상 프로그램 목록 작성   처리   MAIN     */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char 	szSysCD                [dfSysCD];    /* 시스템코드         */
+char 	szOutName           [dfRsrcName];    /* 처리결과파일       */
+char	szRsrcType          [dfRsrcType];
+char	szPhyName	        [dfPhysName];
+char 	szServerIP             [dfSvrIP];
+int  	szPortNo                        ;
+int		AgentPort                       ;
+int		retval                          ;
+CMD_INFO	  CmdInfo                   ;
+
+
+	if (argc != 5) {
+        printf ("Usage : %s <SysCD> <RESOURCETYPE> <PHYSICALNAME> <OutFileName>\n", argv[0]);
+        exit (0);
+    }
+
+    memset(szSysCD   , 0x00, sizeof(szSysCD   ));
+    memset(szRsrcType, 0x00, sizeof(szRsrcType));
+    memset(szPhyName , 0x00, sizeof(szPhyName ));
+    memset(szOutName , 0x00, sizeof(szOutName ));
+
+    sprintf(szSysCD   , "%s", argv[1]);
+    sprintf(szRsrcType, "%s", argv[2]);
+    sprintf(szPhyName , "%s", argv[3]);	
+	sprintf(szOutName , "%s", argv[4]);
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+	/*-----------------------------------------------------------*/
+	/*	ProFrame_Call Parameter                                  */
+	/*		pCODE       : 구분                                   */
+	/*	    pSysCD      : 시스템코드                             */
+	/*	    szRsrcType    리소스명		                         */
+	/*	    szPhyName   : 물리명                                 */
+	/*	    szOutName   : 리스트파일                             */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_SVRIP
+		  INTO  :szServerIP
+		  FROM  CMM0039
+	     WHERE  CM_SYSCD = :szSysCD
+	       AND  CM_DIRCD = '01';
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr, "시스템코드 오류 : [%s] [%d] [%s]\n"
+		              , szSysCD, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return (1);
+	}
+
+	EXEC SQL
+		SELECT  DISTINCT
+		        CM_PORTNO
+		  INTO  :AgentPort
+		  FROM  CMM0031
+		 WHERE  CM_SYSCD = :szSysCD
+		   AND	CM_SVRIP = :szServerIP
+	       AND  CM_SVRCD = '01'
+	       AND  ROWNUM = 1;;
+
+	if (sqlca.sqlcode != 0){
+		AgentPort = dfeCAMSFepPort;
+	}	
+
+	NotUseDataTruncate (szServerIP, 0x20);
+
+	InitCmdInfo(&CmdInfo);
+
+	CmdInfo.nPort = AgentPort;
+	strcpy(CmdInfo.szServerIP, szServerIP);
+
+	retval = ProFrame_Call	( "REQUEST_PUBLISH"
+	                        , szSysCD
+	                        , szRsrcType
+						    , szPhyName
+						    , szOutName);
+
+	if (retval != 0){
+		exit(retval);
+	}
+	
+	retval = ProFrame_Call	( "PUBLISH_APPROVAL"
+	                        , szSysCD
+	                        , szRsrcType
+						    , szPhyName
+						    , szOutName);
+
+	
+    EXEC SQL COMMIT WORK RELEASE;
+
+    exit (retval);
+
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

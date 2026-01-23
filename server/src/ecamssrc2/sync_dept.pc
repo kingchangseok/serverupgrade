@@ -1,0 +1,276 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ sync_dept.pc                                 │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 조직 동기화(DeptInfo)                        │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2008. 01. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		내부함수			                                     */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+char    ** gEnvp;
+char	hostgb       [4];          /* System ID                  */
+char	RsrcCD      [10];          /* 자원구분                   */
+char	DsnCD       [10];          /* 자원위치                   */
+char	RstDsnCD    [10];          /* 자원위치                   */
+char	indat       [4096];        /* File Read Buffer           */
+char 	RsrcName    [50];          /* 자원명 (Remote)            */
+char	filename    [256];         /* Parsing File Name          */
+char	gConnStr    [50];          /* Connect String             */
+char	szDVServerIP[20];          /* Server IP : TEST           */
+char	makeParm    [256];
+char    gBackPath   [50];          /* Source BackUp 위치         */
+char 	t_work1[100], t_work2[100], t_work3[100];
+
+char 	szComd[256];
+char 	Frfile[256], Tofile[256];
+char    szProgPath[200];
+char    sv_col[50][100];           /*  분석할 Column 저장        */
+int 	nRet, i_cnt, idx;
+int	conflag, t_cnt, p_cnt;
+
+#define	REC_BUF   2048
+
+FILE 	*fptr;                     /* File Open Pointer          */
+CMD_INFO CmdInfo;
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*		조직 동기화(DeptInfo)    처리  MAIN                      */
+/*                                                               */
+/*****************************************************************/
+int  main(int argc, char **argv, char **envp)
+{
+    gEnvp = envp;
+
+    sprintf(RsrcName, "%s", "DeptInfo.txt");    /* 읽을 화일이름 */
+
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+        printf("Oracle DB Connect Error... [%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		exit(1);
+    }
+
+
+    /*-----------------------------------------------------------*/
+    /*  파일 저장위치 정보 조회                                  */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_PATH
+		  INTO  :szProgPath
+		  FROM  CMM0012
+		 WHERE  CM_PATHCD = '82';
+
+	if (sqlca.sqlcode != 0) {
+		printf("CMM0012 SQL Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return(-1);
+	}
+	NotUseDataTruncate(szProgPath, 0x20);
+
+	if (memcmp((char *)right_char(szProgPath, 1), "/", 1) != 0)
+		sprintf(szProgPath,"%s%s", szProgPath,"/");
+
+	/*-----------------------------------------------------------*/
+	/* 	임시파일 디렉토리 생성 및 파일 OPEN                      */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_Path
+		  INTO  :gBackPath
+		  FROM  CMM0012
+		 WHERE  CM_StNo   = 'ECAMS'
+		   AND  CM_PathCD = '99';
+
+	if (sqlca.sqlcode != 0) {
+		printf("CMM0012 SQL Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return(-1);
+	}
+	NotUseDataTruncate(gBackPath, 0x20);
+
+	if (memcmp((char *)right_char(gBackPath, 1), "/", 1) != 0)
+		sprintf(gBackPath,"%s/", gBackPath);
+
+	Local_Dir_Make(gBackPath);
+
+	sprintf(Frfile, "%s%s", szProgPath, RsrcName);
+	sprintf(Tofile, "%s%s", gBackPath,  RsrcName);
+	sprintf(szComd,"cp -f %s %s \n",Frfile, Tofile);
+	NotUseDataTruncate(Frfile, 0x20);
+	NotUseDataTruncate(Tofile, 0x20);
+
+	if (system(szComd) != 0) {
+	    printf(" File Copy 실패... [%s] \n", szComd);
+	    return(1);
+	}
+
+    /*-----------------------------------------------------------*/
+    /*   Parsing File Open  Read                                 */
+    /*-----------------------------------------------------------*/
+    sprintf(filename, "%s", Tofile);      /* 분석할 파일 위치    */
+
+    if ((fptr = fopen(filename,"r")) == (FILE *) NULL) {
+        printf("FILE Open Error [%s]\n", filename);
+        return(1);
+    }
+
+    /*-----------------------------------------------------------*/
+    /* 	조직정보 일괄 갱신(Not Use)                              */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		UPDATE  CMM0100
+		   SET  CM_USEYN  = 'N'
+		 WHERE  CM_HANDYN = 'N';
+
+    if (sqlca.sqlcode != 0) {
+		printf(" CMM0100 UPDATE ERROR--->[%d][%s] \n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return(-1);
+    }
+
+    memset(indat, 0x00, sizeof(indat));
+    t_cnt = p_cnt = 0;                    /* initialize to count */
+
+	/*-----------------------------------------------------------*/
+	/*  분석할 Column 추출                                       */
+	/*-----------------------------------------------------------*/
+    while((fgets(indat, REC_BUF, fptr)) != (char *) NULL) {
+		idx = 0;                        /* initialize to index   */
+        t_cnt++;                        /* Total Record Count    */
+
+		while(*indat != '\n') {
+	    	nRet = Char_Check(indat, "|");  /* Record delemeter  */
+	    	if (nRet >= 0) {
+                memset(makeParm, 0x00, sizeof(makeParm));
+		        memcpy(makeParm, indat, nRet);
+		        strcpy(makeParm, (char *)trunc_char(makeParm));
+		        strcpy(sv_col[idx++], makeParm);
+		        strcpy(indat, (char *)right_char(indat, strlen(indat) - nRet - 1));
+		        strcpy(indat, (char *)trunc_char(indat));
+	    	}
+		}
+
+		/*-------------------------------------------------------*/
+		/*	07102 IT정보분사, 07831 농협정보시스템 이 아니거나   */
+		/*	폐점일이 있으면 대상에서 제외                        */
+		/*-------------------------------------------------------*/
+		if ((memcmp(sv_col[6], "07102", 5) != 0) ||
+	    	(*sv_col[11] != NULL))  {
+	    	continue;
+		}
+
+		/*-------------------------------------------------------*/
+		/*  조직코드가 "011A1A223"로 시작되고                    */
+		/*  폐점일이 없는 자료만 처리                            */
+		/*-------------------------------------------------------*/
+        p_cnt++;             /* Processing Record Count */
+		strcpy(t_work1, sv_col[0]);   /* Row의 1번째 사무소코드 */
+		strcpy(t_work2, sv_col[2]);   /* Row의 3번째 사무소명   */
+		strcpy(t_work3, sv_col[1]);   /* Row의 2번째 조직코드   */
+
+        /*-------------------------------------------------------*/
+        /*  조직정보 자료건수 확인                               */
+        /*-------------------------------------------------------*/
+		EXEC SQL
+			SELECT  COUNT(*)
+			  INTO  :i_cnt
+			  FROM  CMM0100
+			 WHERE  CM_DEPTCD = :t_work1;
+/* 2014.02.24 DEPTSEQ ->CM_SEQNO 변경*/ 
+		if (i_cnt == 0) {
+	        /*---------------------------------------------------*/
+	        /*  조직정보 생성자료 추가                           */
+	        /*---------------------------------------------------*/
+            EXEC SQL
+	            INSERT INTO CMM0100
+					( CM_DEPTCD
+					, CM_DEPTNAME
+					, CM_SEQNO
+					, CM_USEYN
+					)
+				VALUES
+					( :t_work1
+					, :t_work2
+					, :t_work3
+					, 'Y'
+					);
+
+            if (sqlca.sqlcode != 0) {
+                printf("CMM0100 INSERT Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+	        	return(-1);
+            }
+        }
+        else {
+			/*---------------------------------------------------*/
+			/*  조직정보 생성자료 갱신                           */
+			/*---------------------------------------------------*/
+/* 2014.02.24 DEPTSEQ ->CM_SEQNO 변경*/ 
+
+			EXEC SQL
+				UPDATE  CMM0100
+				   SET  CM_DEPTNAME = :t_work2
+				   	  , CM_SEQNO    = :t_work3
+				   	  , CM_USEYN    = 'Y'
+				 WHERE  CM_DEPTCD   = :t_work1;
+
+			if (sqlca.sqlcode != 0) {
+				printf("CMM0100 UPDATE Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				return(-1);
+			}
+		}
+
+        /*-------------------------------------------------------*/
+        /*  사용자정보  갱신                                     */
+        /*-------------------------------------------------------*/
+		EXEC SQL
+			UPDATE  CMM0040
+			   SET  CM_DEPTSEQ = :t_work3
+			 WHERE  CM_PROJECT = :t_work1;
+
+		if (sqlca.sqlcode != 0) {
+			printf("CMM0040 UPDATE Err[%d][%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+
+		}
+		else {
+			printf(" 처리한 자료 ===> 건수[%d] t_work1[%s] t_work2[%s] t_work3[%s] \n",p_cnt,t_work1,t_work2,t_work3);
+		}
+	}
+
+	fclose (fptr);
+	printf("<<<--- 전체 자료건수=[%d]  처리한 자료건수=[%d] --->>> \n\n",t_cnt, p_cnt);
+
+	remove(filename);
+
+	EXEC SQL  COMMIT WORK RELEASE;
+
+	return (0);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

@@ -1,0 +1,330 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_accomp_get.pc                          │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 신청자원을 적용서버로 전송                   │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2006. 08. 10                                 │
+ ├──────┼───────────────────────┤
+ │ 작  정  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_accomp.h";
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+void	SYSCOM_Rsrc_Get_T		(); 
+void	SYSCOM_Rsrc_Get0		();
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : SYSCOM_Rsrc_Get_T                                */
+/*	Action    : 서버에서 파일 수신 처리 MAIN                     */
+/*  Parameter : pServerIP    : 서버주소                          */
+/*              pAcptNo      : 신청번호                          */
+/*              pSerNo       : 일련번호                          */
+/*              pSysCD       : 시스템코드                        */
+/*              pDsnCD       : 디렉토리코드                      */
+/*              pRsrcCD      : 프로그램종류                      */
+/*              pRsrcName    : 프로그램명                        */
+/*              pVolDir      : 디렉토리                          */
+/*              pReqCD       : 요청구분                          */
+/*              nSpoolGb     : 처리구분                          */
+/*              pPrcSys      : 처리단계                          */
+/*              pCmdInfo     : Socket Structure                  */
+/*              pRstFile     : 처리결과파일                      */
+/*              pGubun       : 구분코드                          */
+/*              pSvrCd       : 서버구분                          */
+/*              pSvrSeq      : 서버일련번호                      */
+/*  Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	SYSCOM_Rsrc_Get_T	( char *pServerIP
+							, char *pAcptNo
+							, char *pSerNo
+							, char *pSysCD
+							, char *pDsnCD
+							, char *pRsrcCD
+							, char *pRsrcName
+							, char *pVolDir
+							, char *pReqCD
+							, int   nSpoolGb
+							, char *pPrcSys
+							, CMD_INFO *pCmdInfo
+							, char *pRstFile
+							, char *pGubun
+							, char *pSvrCd
+							, int   pSvrSeq
+							)
+{
+
+	SYSCOM_Rsrc_Get0 ( pServerIP
+					, pAcptNo
+					, pSerNo
+					, pSysCD
+					, pDsnCD
+					, pRsrcCD
+					, pRsrcName
+					, pVolDir
+					, pReqCD
+					, nSpoolGb
+					, pPrcSys
+					, pCmdInfo
+					, pRstFile
+					, pGubun
+					, pSvrCd
+					, pSvrSeq
+					);
+		
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : SYSCOM_Rsrc_Get0                                 */
+/*	Action    : 서버에서 파일 수신 처리                          */
+/*  Parameter : pServerIP    : 서버주소                          */
+/*              pAcptNo      : 신청번호                          */
+/*              pSerNo       : 일련번호                          */
+/*              pSysCD       : 시스템코드                        */
+/*              pDsnCD       : 디렉토리코드                      */
+/*              pRsrcCD      : 프로그램종류                      */
+/*              pRsrcName    : 프로그램명                        */
+/*              pVolDir      : 디렉토리                          */
+/*              pReqCD       : 요청구분                          */
+/*              nSpoolGb     : 처리구분                          */
+/*              pPrcSys      : 처리단계                          */
+/*              pCmdInfo     : Socket Structure                  */
+/*              pRstFile     : 처리결과파일                      */
+/*              pGubun       : 구분코드                          */
+/*              pSvrCd       : 서버구분                          */
+/*              pSvrSeq      : 서버일련번호                      */
+/*  Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	SYSCOM_Rsrc_Get0	( char *pServerIP   
+							, char *pAcptNo 
+							, char *pSerNo
+							, char *pSysCD 
+							, char *pDsnCD 
+							, char *pRsrcCD
+							, char *pRsrcName   
+							, char *pVolDir 
+							, char *pReqCD
+							, int   nSpoolGb
+							, char *pPrcSys
+							, CMD_INFO *pCmdInfo
+							, char *pRstFile
+							, char *pGubun
+							, char *pSvrCd
+							, int pSvrSeq
+							)
+{	
+char 	szCommand		    [dfFullPath];
+char 	szModuleName        [dfRsrcName];
+char 	szTempFile		    [dfRsrcName];
+char 	szRemotePath	         [dfDir];
+char 	szRemoteFile	    [dfRsrcName];
+char 	gszRsultPath        [dfRsrcName];
+long 	lFileSize                       ;
+char 	szSysOs                [dfSysOS];
+char    szSYSUPPath              [dfDir];
+char	gBackPath	        [dfFullPath];
+char 	szReqPath	             [dfDir];
+char	szRstFile		    [dfFullPath];
+int		nSerNo                          ;
+int		pRet                            ;
+struct	stat  f_st                      ;
+char	szSvrInfo            [dfSvrInfo];
+int		nPort                           ;
+char	szchmod                      [6];
+char	szchown                     [21];
+char	szchgrp                     [21];
+char	pJobCD                 [dfJobCD];
+int		befSize                         ;
+int		aftSize                         ;
+		
+
+	nSerNo = atoi(pSerNo);
+
+	/*-----------------------------------------------------------*/
+	/*	신청 업무 코드 조회                                      */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CR_JOBCD
+		  INTO  :pJobCD
+		  FROM  CMR1010
+		 WHERE  CR_ACPTNO = :pAcptNo
+		   AND  CR_SERNO  = :nSerNo;
+
+	NotUseDataTruncate (pJobCD,   0x20);
+	
+	/*-----------------------------------------------------------*/
+	/*	서버정보 조회 (OS종류, 포트번호                          */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_SYSOS
+		      , CM_PORTNO
+		  INTO  :szSysOs
+		  	  , :nPort
+		  FROM  CMM0031
+		 WHERE  CM_SYSCD = :pSysCD
+		   AND  CM_SVRCD = :pSvrCd
+		   AND  CM_SEQNO = :pSvrSeq;
+		
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[%s][%d][SYSGET] serverinfo Get Err [%d][%s]", pAcptNo, nSerNo, sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		strcpy(pCmdInfo->szRstCond, "EROR");
+		return;
+	}			
+	NotUseDataTruncate (szSysOs, 0x20);
+  		
+	/*-----------------------------------------------------------*/
+	/*	소켓 버퍼사이즈 SET                                      */
+	/*-----------------------------------------------------------*/
+	if (Server_Buff_Size(pSysCD, pSvrCd, pSvrSeq) == FALSE) {
+		/*LOG*/sprintf(gszLogMsg,"[%s][%d][SYSGET] serverinfo(Buffer Size) Get Err [%d][%s]", pAcptNo, nSerNo, sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		strcpy(pCmdInfo->szRstCond, "EROR");
+		return;
+	}
+
+	/*-----------------------------------------------------------*/
+	/*	서버의 권한변경정보 조회                                 */
+	/*-----------------------------------------------------------*/
+	memset(szchmod, 0x00, sizeof(szchmod));
+	memset(szchown, 0x00, sizeof(szchown));
+	memset(szchgrp, 0x00, sizeof(szchgrp));	
+	
+	EXEC SQL
+		SELECT  CM_OWNER
+		      , CM_GRPID
+		      , CM_PERMISSION
+		  INTO  :szchown
+		  	  , :szchgrp
+		  	  , :szchmod
+		  FROM  CMM0035
+		 WHERE  CM_SYSCD = :pSysCD
+		   AND  CM_SVRCD = :pSvrCd
+		   AND  CM_SEQNO = :pSvrSeq
+		   AND  CM_JOBCD = :pJobCD;
+	
+	NotUseDataTruncate (szchmod, 0x20);
+	NotUseDataTruncate (szchown, 0x20);
+	NotUseDataTruncate (szchgrp, 0x20);
+
+    /*-----------------------------------------------------------*/
+    /*  배포대상 파일 저장 PATH                                  */
+    /*-----------------------------------------------------------*/
+	SetTempDir("77",gBackPath);
+	
+	sprintf(szReqPath,"%s%s",gBackPath,pAcptNo);
+	Local_Dir_Make(szReqPath);
+	
+	/*-----------------------------------------------------------*/
+    /*  결과  파일 저장 PATH                                     */
+    /*-----------------------------------------------------------*/					       
+	sprintf(szRstFile,"%s/%s.%d.%s.%d.result", gszTempPath, pAcptNo, atoi(pSerNo),pSvrCd,pSvrSeq);	  
+	
+	/*-----------------------------------------------------------*/
+	/*	배포할 자원명 생성                                       */
+	/*-----------------------------------------------------------*/
+	sprintf(szTempFile,"%s/%s.%s.%s",szReqPath,pRsrcName,pAcptNo,pSerNo);	  
+ 
+	sprintf(szRemotePath, "%s", pVolDir);
+	
+	if ((strncmp(pSvrCd, "03", 2) == 0 || 
+		 strncmp(pSvrCd, "04", 2) == 0 ) && 
+		strncmp(pPrcSys, "SYSCB", 5) == 0) {
+		sprintf(szRemoteFile,"%s.%s.%s",pRsrcName,pAcptNo,pSerNo);
+	}
+	else {
+		sprintf(szRemoteFile,"%s",pRsrcName);
+	}
+	strcpy(pCmdInfo->szRstCond,"0000");
+
+	/*-----------------------------------------------------------*/
+	/*	자원 전송						                         */
+	/*-----------------------------------------------------------*/
+	if (memcmp(pCmdInfo->szRstCond, "0000", 4) == 0 && nSpoolGb != 9) {
+		Server_Dir_Make(pCmdInfo, szRemotePath);	
+		
+		sprintf(pCmdInfo->szCommand,"%s%s",szRemotePath, szRemoteFile); 
+		sprintf(pCmdInfo->szJobGub,"I");
+		Server_Cmd_JOB(pCmdInfo);
+		
+		if (memcmp(pCmdInfo->szRstCond,"0000", 4) == 0) {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%s][SYSGET1] 파일 정보 수신 완료 IP[%s] Port[%d] remoteFile[%s] RstCond[%s]\n",
+							pAcptNo,pSerNo,pCmdInfo->szServerIP, pCmdInfo->nPort, pCmdInfo->szCommand, pCmdInfo->szRstCond);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			
+			befSize = 0;
+			befSize = pCmdInfo->lFileSize;
+		}
+		else {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%s][SYSGET1] 파일 정보 수신 실패 완료 IP[%s] Port[%d] remoteFile[%s] RstCond[%s]\n",
+							pAcptNo,pSerNo,pCmdInfo->szServerIP, pCmdInfo->nPort, pCmdInfo->szCommand, pCmdInfo->szRstCond);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return;
+		}	
+
+		sprintf(pCmdInfo->szRemote, "%s%s",szRemotePath,szRemoteFile);  
+		sprintf(pCmdInfo->szLocal , "%s", szTempFile);		
+		sprintf(pCmdInfo->szJobGub,"G");
+		Server_Cmd_JOB(pCmdInfo);		
+
+		if (memcmp(pCmdInfo->szRstCond, "0000", 4) == 0) {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%s][SYSGET1] 파일 수신 완료 IP[%s] Port[%d] Local[%s] Remote[%s] RstCond[%s]\n",
+							pAcptNo,pSerNo,pCmdInfo->szServerIP, pCmdInfo->nPort, pCmdInfo->szLocal, pCmdInfo->szRemote, pCmdInfo->szRstCond);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			memset(pRstFile, 0x00, sizeof(pRstFile));
+		}
+		else {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%s][SYSGET1] 파일 수신 실패 IP[%s] Port[%d] Local[%s] Remote[%s] RstCond[%s]\n",
+							pAcptNo,pSerNo,pCmdInfo->szServerIP, pCmdInfo->nPort, pCmdInfo->szLocal, pCmdInfo->szRemote, pCmdInfo->szRstCond);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			
+			/*---------------------------------------------------*/
+			/*	자원 전송 오류 발생시   		                 */
+			/*---------------------------------------------------*/
+			sprintf(szCommand, "tail -15 %sTransList.%s | grep %s > %sTransList.%s.tmp",gszLogPath,gszLogFile,pAcptNo,gszLogPath,gszLogFile);
+			system(szCommand);
+			sprintf(pRstFile,"%sTransList.%s.tmp",gszLogPath,gszLogFile);
+			return;
+		}	
+		
+		stat(szTempFile, &f_st);
+		aftSize = 0;
+		aftSize = f_st.st_size;
+		if (befSize != aftSize) {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%s][SYSGET1] 파일 크기 틀림 IP[%s] Port[%d] Local[%s][%d] Remote[%s][%d] \n",
+							pAcptNo,pSerNo,pCmdInfo->szServerIP, pCmdInfo->nPort, pCmdInfo->szLocal,aftSize, pCmdInfo->szRemote,befSize);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			strcpy(pCmdInfo->szRstCond,"SIZE");
+			return;
+		}		
+	}	
+	
+	sprintf(pCmdInfo->szRstCond, "%s", "0000");
+	return;
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

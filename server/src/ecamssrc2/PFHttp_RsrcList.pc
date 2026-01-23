@@ -1,0 +1,208 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ PFHttp_RsrcList.pc                           │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ ProFrame Owner별 프로그램 목록 작성          │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2012. 04. 23                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain	1
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include    <ecamsapi.h>
+#include    <ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+FILE *fp;
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+char	gDCORConnStr     [256];
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*		ProFrame 체크인대상 프로그램 목록 작성   처리   MAIN     */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char **envp)
+{
+char 	szSysCD                [dfSysCD]; /* 시스템코드          */
+char 	szOutName           [dfFullPath]; /* 처리결과파일        */
+char	szUserID	          [dfEditor]; /* USER ID             */
+char 	szRstFile           [dfFullPath]; /* 처리결과파일        */
+char	dummy                     [2048]; /* Read Buffer         */
+char	szTmpPath	             [dfDir]; /* Directory Lenth     */
+char	szJOBID               [dfPrcSys];
+int		retval                          ;
+int		Index_key                       ;
+char	*toktmp                         ;
+char	*szKeys                      [5];
+int 	nCnt                            ;
+char	SysCmd                     [256];
+char	szRsrcName          [dfRsrcName];
+char	szJobGrp                    [20];
+char	filename            [dfFullPath];
+int		nRet                            ;
+FILE	*SrcPtr			                ;
+FILE	*RstPtr			                ;
+
+
+
+	if (argc != 4) {
+        printf ("Usage : %s <SysCD> <USERID> <결과파일>\n", argv[0]);
+        exit (0);
+    }
+
+	sprintf(filename , "%s.log", argv[0]);
+
+	TRACE = fopen (filename, "w+");
+	if (TRACE == NULL)  {
+		fprintf (stderr, "%s : file Open Err\n", filename);
+		fflush  (stderr);
+		exit (0);
+	}
+
+    memset(szSysCD  , 0x00, sizeof(szSysCD  ));
+    memset(szUserID , 0x00, sizeof(szUserID ));
+    memset(szOutName, 0x00, sizeof(szOutName));
+    memset(szRstFile, 0x00, sizeof(szRstFile));
+
+    sprintf(szSysCD  , "%s", argv[1]);
+    sprintf(szUserID , "%s", argv[2]);
+    sprintf(szRstFile, "%s", argv[3]);
+    sprintf(szOutName, "%s_list", argv[3]);
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(1);
+
+
+	/*-----------------------------------------------------------*/
+	/*	ProFrame_Call Parameter                                  */
+	/*		pCODE       : 구분                                   */
+	/*	    pSysCD      : 시스템코드                             */
+	/*	    szRsrcType    리소스명		                         */
+	/*	    szPhyName   : 물리명                                 */
+	/*	    szOutName   : 리스트파일                             */
+    /*-----------------------------------------------------------*/
+	retval = ProFrame_Call	( "RESOURCE_LIST"
+	                        , szSysCD
+						    , ""
+	                        , szUserID
+						    , szOutName);
+
+	SetTempDir("99", szTmpPath);	
+	
+	if (memcmp((char *)right_char(szTmpPath, 1), "/", 1) != 0)
+		sprintf(szTmpPath, "%s/", szTmpPath);
+
+	if (retval == 0) {
+    	sprintf(szOutName, "%s_list",  argv[3]);
+
+    	/*-------------------------------------------------------*/
+		/*		처리구분별 처리결과 체크                         */
+		/*-------------------------------------------------------*/
+	    if ((SrcPtr = fopen(szOutName, "r")) == (FILE *) NULL) {
+			fprintf(stderr, "처리결과파일 OPEN 오류 [%s]\n", szOutName);
+			exit (1);
+		}
+
+    	/*-------------------------------------------------------*/
+		/*		처리구분별 처리결과 체크                         */
+		/*-------------------------------------------------------*/
+    	sprintf(szOutName, "%s", argv[3]);
+	    if ((RstPtr = fopen(szOutName, "w")) == (FILE *) NULL) {
+			fprintf(stderr, "처리결과파일 OPEN 오류 [%s]\n", szOutName);
+			exit (1);
+		}
+
+		/*-------------------------------------------------------*/
+		/*	조회된 테이블 CRUD 연관도 테이블에 저장              */
+		/*-------------------------------------------------------*/
+		while (fgets(dummy, 2048, SrcPtr) != (char *) NULL) {
+			strcpy(dummy, (char *)rep_char(dummy,"\n"  , ""));
+			strcpy(dummy, (char *)rep_char(dummy,"\r\n", ""));
+			strcpy(dummy, (char *)trunc_char(dummy));
+
+			Index_key = 0;
+			while(1) {
+				if (Index_key == 0) {
+					szKeys[Index_key] = strtok_r(dummy, (char *)":", &toktmp);
+				}
+				else {
+					szKeys[Index_key] = strtok_r(NULL , (char *)":", &toktmp);
+				}
+
+				if (szKeys[Index_key] == NULL) break;
+				Index_key++;
+			}
+
+			/*---------------------------------------------------*/
+			/*	리소스명, 업무그룹명 작성                        */
+			/*---------------------------------------------------*/
+			memset(szRsrcName, 0x00, sizeof(szRsrcName));
+			memcpy(szRsrcName, szKeys[1], strlen(szKeys[1]));
+
+			memset(szJobGrp, 0x00, sizeof(szJobGrp));
+			memcpy(szJobGrp, szKeys[3], strlen(szKeys[3]));
+			
+			/*---------------------------------------------------*/
+			/*	기 등록여부 체크                                 */
+			/*---------------------------------------------------*/
+			EXEC SQL
+				SELECT  COUNT(*)
+				  INTO  :nCnt
+				  FROM  CMR0020
+				 WHERE  CR_SYSCD    = :szSysCD
+				   AND  CR_RSRCCD  != '51'
+				   AND  CR_RSRCCD  != '52'
+				   AND  CR_RSRCNAME = :szRsrcName;
+
+			if (sqlca.sqlcode != 0)
+				nCnt = 0;
+
+			if (nCnt == 0) {
+				fprintf(stdout, "[%-20s] [%-35s] [%-85s] [%-10s]\n", szKeys[0], szKeys[1], szKeys[2], szKeys[3]);
+				fprintf(RstPtr, "%-100s%-30s%-500s%-10s\n", szKeys[1], szKeys[0], szKeys[2], szKeys[3]);
+			}			
+		}
+		fclose (SrcPtr);
+		fclose (RstPtr);
+
+    	sprintf(szOutName, "%s_list", argv[3]);
+		remove (szOutName);
+
+    	sprintf(szOutName, "%s", argv[3]);
+		sprintf(SysCmd, "ecams_fileconv %s 2", szOutName);
+		system (SysCmd);
+	}
+
+    EXEC SQL COMMIT WORK RELEASE;
+	
+    exit (retval);
+
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

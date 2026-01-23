@@ -1,0 +1,203 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_bkdata.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 디렉토리 백업                                │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 08. 12                                 │
+ ├──────┼───────────────────────┤
+ │ 작  정  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<dirent.h>
+#include 	<stddef.h>
+
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+int 	chkDel	();
+void	list_directory	();
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : list_directory                                   */
+/*	Action    : 디렉토리/파일 목록 작성                          */
+/*  Parameter : dirname   : 디렉토리                             */
+/*	            tFileName : 파일명                               */
+/*	            jugi      : 백업주기                             */
+/*  Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	list_directory	( char *dirname
+						, char *tFileName
+						, int   jugi
+						)
+{
+DIR* dp                                 ;
+struct	dirent*  dirp                   ;
+struct	stat     fstat                  ;
+char	szCommand           [dfFullPath];
+char	szFullDir                [dfDir];
+char	szBackPath               [dfDir];
+	
+  
+    dp = opendir(dirname);
+    if (!dp) {
+        fprintf(stderr,"can't open directory (%s)\n", dirname);
+        perror("open directory ");
+        return;
+    }  
+    chdir(dirname);
+ 
+    while ((dirp = readdir(dp)) != NULL) {       
+        if (strcmp(dirp->d_name, "." ) == 0 || 
+        	strcmp(dirp->d_name, "..") == 0 ) {
+            continue;
+        }
+     
+        if (stat(dirp->d_name, &fstat) == -1) {
+            fprintf(stderr,"can't stat file (%s)\n", dirp->d_name);
+            perror("stat file");
+            continue;
+        }
+       
+        if (S_ISDIR(fstat.st_mode)) {
+        	if (strlen(dirp->d_name) > 10){
+	        	if (chkDel(dirp->d_name,jugi) > 0) {
+	        		if (strlen(tFileName) != 0) {
+						if (strstr(tFileName,"Result") != NULL){
+							sprintf(szBackPath,"%s/%s",tFileName,mid_char(dirp->d_name,5,2));
+							if (access(szBackPath,F_OK) != 0){
+								Local_Dir_Make(szBackPath);
+							}
+							
+	        				sprintf(szCommand,"mv %s/ %s/",dirp->d_name,szBackPath);
+		       				system(szCommand);
+		       			}		       			
+		       			else {
+				       		sprintf(szCommand,"rm -rf %s/",dirp->d_name);			
+				       		system(szCommand);	       				
+		       			}
+		       		}
+		       		else {
+			       		sprintf(szCommand,"rm -rf %s/",dirp->d_name);		
+			       		system(szCommand);
+		       		}
+	        	}
+	        }
+	        else {
+	        	sprintf(szFullDir,"%s/%s",dirname,dirp->d_name);	        	
+	        	list_directory (szFullDir,tFileName,jugi);
+	        	continue;
+	        }
+        }
+    }
+    closedir(dp);
+    chdir("..");
+}
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : chkDel                                           */
+/*	Action    : 삭제 대상 체크                                   */
+/*  Parameter : pAcptNo : 신청번호                               */
+/*	            jugi    : 삭제주기                               */
+/*  Return    : 대상건수                                         */
+/*---------------------------------------------------------------*/
+int 	chkDel	( char *pAcptNo
+				, int   jugi
+				)
+{
+int 	rtval                           ;
+		
+	
+	/*-----------------------------------------------------------*/
+	/*	처리완료일로부터 삭제주기 경과여부 체크                  */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  SIGN(SYSDATE - (CR_PRCDATE + :jugi))
+		  INTO  :rtval
+		  FROM  CMR1000
+		 WHERE	CR_ACPTNO = :pAcptNo
+		   AND  CR_PRCDATE IS NOT NULL;
+		
+	if (sqlca.sqlcode != 0) {
+		rtval = -1;
+	}
+	
+	if (rtval <= 0) {
+		return rtval;
+	}
+	
+	return rtval;
+}
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       형상관리 디렉토리 백업  처리  M A I N                   */
+/*                                                               */
+/*****************************************************************/
+int 	main	(int argc, char* argv[] )
+{
+char	szSysDate                  [8+1];
+char	szDirPath                [dfDir];
+char	szBackPath               [dfDir];
+	
+
+	if (argc < 4){
+		fprintf(stderr, "Usage: <대상디렉토리> <백업디렉토리> <주기(일)> \n");
+		exit(1);
+	}
+		
+	Get_Sys_Date(szSysDate);
+	
+	memset(szDirPath , 0x00, sizeof(szDirPath ));
+	memset(szBackPath, 0x00, sizeof(szBackPath));
+	
+	sprintf(szDirPath , "%s", argv[1]);
+	sprintf(szBackPath, "%s", argv[2]);
+	
+	if (strlen(szBackPath) == 0) {
+		memset(szBackPath, 0x00, sizeof(szBackPath));
+	}
+	else {
+		sprintf(szBackPath, "%s/%s", szBackPath, szSysDate);		
+		if (access(szBackPath,F_OK) != 0) {
+			Local_Dir_Make(szBackPath);
+		}		
+	}
+	
+	if (ConnectDB() == FALSE)
+		exit(1);
+	
+	list_directory(szDirPath,szBackPath,atoi(argv[3]));
+	
+	exit (0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

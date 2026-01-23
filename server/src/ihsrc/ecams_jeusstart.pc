@@ -1,0 +1,308 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_accomp.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 서버별 컴파일 및 배포 처리 MAIN              │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 08                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include 	<ecamsapi.h>
+#include	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_accomp.h";
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+int      cSockId    ;                 /* Connect Socket ID       */
+int  	 gRcvFd     ;                 /* 수신용 File Pointer     */
+int  	 gSndFd     ;                 /* 송신용 File Pointer     */
+int  	 gProcStep  ;                 /* 송신/수신 상태          */
+int  	 gProcWork  ;                 /* 송신/수신 여부          */
+int  	 gFileOffset;                 /* 파일 송신 OffSet        */
+char     gJobGub    [2]             ; /* 처리구분                */
+char     gCommand   [dfeCAMSBufSize]; /* 처리명령문              */
+char     gLocal     [dfeCAMSBufSize]; /* Local File Name         */
+char     gLocal1    [dfeCAMSBufSize]; /* Local File Name         */
+char     gRemote    [dfeCAMSBufSize]; /* Remote File Name        */
+int      gFileSize             ;      /* File Size               */
+char     gFileDate         [20];      /* File Date               */
+char     gRstIPAddr        [20];
+char     systime  [16], sysdate [16]; /* 시스템일자, 시간        */
+char     filename         [200];      /* File Name               */
+char     SysCmd           [200];      /* 시스템 명령문           */
+char     indat            [256];      /* Process Name Work       */
+int      nret                  ;
+int      nret1                 ;
+char     sBackSorc1       [200];      /* BackUp File Name        */
+int      i                     ;      /* Loop Count Work         */
+
+
+time_t       time_clock;
+
+/*---------------------------------------------------------------*/
+/*   eCAMS  LOGGING 관련  CONSTANT                               */
+/*---------------------------------------------------------------*/
+FILE   *fd;                           /* Logging File Pointer    */
+struct stat  f_st;                    /* Logging File Struct     */
+struct tm   *loc;                     /* File 정보 Read Pointer  */
+
+char   workbuf [dfeCAMSBufSize];      /* Logging Buffer          */
+WorkStatTag  *stat_t;                 /* Logging Buffer Pointer  */
+
+
+/*---------------------------------------------------------------*/
+/*   SOCKET 통신관련  CONSTANT                                   */
+/*---------------------------------------------------------------*/
+ulong  ul_servip;                     /* Server IP의 Convert IP  */
+int    retval;                        /* 처리결과                */
+FILE   *ScrPtr;                       /* LocalFile작성용 Pointer */
+char   **gEnvp;                       /* Parameter죵료용 Pointer */
+
+extern    int    errno;               /* 시스템 오류코드         */
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*       서버 Agent 상태 체크 처리 M A I N                       */
+/*                                                               */
+/*****************************************************************/
+int 	main (int argc, char **argv, char **envp)
+{
+char   ssyscd                  [dfSysCD]; /* 시스템 ID           */
+char   sSvrcd                  [dfSvrCD]; /* 서버구분            */
+char   ServerIP                [dfSvrIP]; /* SERVER IPADDRESS    */
+char   sRstCond              [dfRstCode]; /* SERVER Check 결과   */
+char   szSysMsg                   [30+1]; /* 시스템설명          */
+char   szCodeName                 [20+1]; /* 코드명칭            */
+char   filename             [dfFullPath];
+char   SvrUser                    [20+1];
+int    SvrPort                          ; /* 사용 PROT           */
+int    ret  = 0;
+char   szTime                     [20+1];
+char   szDate                     [20+1];
+int    nCount = 0;
+int    nSCount = 0;
+
+CMD_INFO	  CmdInfo                   ;
+
+  gEnvp = envp;
+
+
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");
+	
+	InitCmdInfo(&CmdInfo);
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);	
+
+    memset (filename, 0x00, sizeof (filename));
+    memset ( szTime, 0x00, sizeof(szTime));
+    
+    sprintf(filename, "%s.log", argv[0]);
+
+	#if 0
+    TRACE = fopen (filename, "w+");
+    if (TRACE == NULL)  {
+        fprintf (stderr, "Log file Open Err = %s\n", filename);
+        fflush  (stderr);
+        exit (0);
+    }
+    #endif
+
+    /*-----------------------------------------------------------*/
+    /*   동시 처리 여부 체크하여 동시처리 방지                   */
+    /*-----------------------------------------------------------*/
+	sprintf(SysCmd, "procck %s", argv[0]);
+	
+	sprintf(szDate   , "%s", argv[1]);
+	sprintf(szTime   , "%s", argv[2]);
+	retval = system(SysCmd)/256;
+/*	if (retval > 2)	exit (1); */
+
+    printf ( "test \n");
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE)
+		exit(2);
+
+
+/*    DefineSignal ();
+*/
+    /*-----------------------------------------------------------*/
+    /*   시스템명칭 최대길이 계산                                */
+    /*-----------------------------------------------------------*/
+    printf ( "jeusstart start \n");
+	ret = system("procck ecams_jeusstart") / 256;
+	if (ret == 1) {
+       /*LOG*/sprintf(gszLogMsg,"[JEUS RESTART]ecams_jeusstart Start\n" );
+       eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);    	         
+
+/*		EXEC SQL
+		    SELECT COUNT(*) 
+		      INTO :nCount
+		      FROM CMR1000
+		     WHERE CR_STATUS ='9'
+		       AND CR_PRCREQ IS NOT NULL
+         AND SUBSTR(CR_PRCREQ, 0, 10) =  :szTime;			 
+*/
+		printf ( "11111111111111\n");
+		while (1) {
+           EXEC SQL    
+               SELECT COUNT(*) 
+                  INTO :nCount
+                  FROM  CMR1000 A, CMR9900 B
+                  WHERE A.CR_STATUS NOT IN ('3', '8', '9' )
+                    AND A.CR_STATUS = B.CR_STATUS
+                    AND A.CR_ACPTNO = B.CR_ACPTNO
+                    AND B.CR_TEAM = 'SYSED'
+                    AND B.CR_LOCAT = '00'
+                    AND A.CR_QRYCD = '04'
+                    AND A.CR_QRYCD = B.CR_QRYCD
+/*                    AND A.CR_PRCTIME = :szTime;*/
+                  and TO_CHAR(A.CR_ACPTDATE, 'YYYYMMDDHH24MI') < :szDate || :szTime
+                  and A.CR_PRCTIME IS NOT NULL;
+                    /*AND SUBSTR(CR_PRCTIME, 0, 4) =  :szTime;*/
+             
+           
+           if ( nCount > 0 ) {
+             
+             printf ( " test sleep time \n");
+             /*LOG*/sprintf(gszLogMsg,"[JEUS RESTART] [%s][%s]ecams_jeusstart sleep time\n",gszLogPath,gszLogFile);
+             eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);    	         
+             sleep(5);
+             nSCount++;
+             if (nSCount == 60) {
+								break;
+             }
+             continue;
+           } else 
+           	 break;
+       }         
+
+	} else {
+	   exit(0);
+	}
+
+    /* 전송 전 shell 프로그램 호출 */
+/*	printf ( "메세지 전송 프로그램 호출 start\n");
+	sprintf ( SysCmd, "sendmsg.sh");
+		 
+	ret = system(SysCmd)/256;
+	if( ret != 0 ) {
+	}
+
+    *LOG*sprintf(gszLogMsg,"[JEUS RESTART] sendmsg.sh Program Start[Deploy Before] [%s][%d]\n", SysCmd,ret );
+    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);  
+*/		 
+    /*-----------------------------------------------------------*/
+    /*   서버 Agent 체크 대상 조회                               */
+    /*-----------------------------------------------------------*/
+    EXEC SQL DECLARE SYSInfo CURSOR FOR
+         SELECT  A.CM_SYSCD
+               , A.CM_SVRCD
+               , A.CM_SVRIP
+               , NVL(A.CM_PORTNO  , 0)
+               , A.CM_SVRUSR
+           FROM  CMM0031 A
+               , CMM0020 B
+          WHERE  A.CM_CLOSEDT IS NULL
+            AND  A.CM_SVRCD <> '90'
+            AND  A.CM_SVRCD = '05'
+            AND  A.CM_SVRIP   IS NOT NULL
+            AND  A.CM_SVRSTOP = 'N'
+            AND  A.CM_SYSCD IN (SELECT  CM_SYSCD
+                                  FROM  CMM0030
+                                 WHERE  CM_CLOSEDT IS NULL
+                               )
+            AND  B.CM_MACODE = 'SERVERCD'
+            AND  B.CM_MICODE = A.CM_SVRCD
+            AND  A.CM_SYSCD  = '90000'
+          ORDER  BY  A.CM_SYSCD, A.CM_SVRCD, A.CM_SVRIP;
+
+	EXEC SQL open SYSInfo;
+	while (1) {
+	   EXEC SQL fetch SYSInfo
+	   	INTO  :ssyscd
+	   		, :sSvrcd
+	   		, :ServerIP
+	   		, :SvrPort
+	   		, :SvrUser;
+       
+	   NotUseDataTruncate(ssyscd  , 0x20);
+	   NotUseDataTruncate(sSvrcd  , 0x20);
+	   NotUseDataTruncate(ServerIP, 0x20);
+	   NotUseDataTruncate(SvrUser, 0x20);
+       
+	   if (sqlca.sqlcode == 1403) break;
+
+       
+       printf ( "aaaaaaaaaaa [%s] [%s] [%s] [%s] [%d]\n", ssyscd, sSvrcd, ServerIP, szCodeName, SvrPort);
+       
+/*       if (nCount == 0 ) {		*/
+         printf ( "bbbbbbbbbbb\n");
+/*
+         *LOG*sprintf(gszLogMsg,"[JEUS RESTART] ecams_jeusstart shell start[%s][%s][%s][%s][%d]",ssyscd, sSvrcd, ServerIP, szCodeName, SvrPort);
+         eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg); 
+*/	     
+         
+	     strcpy(CmdInfo.szJobGub, "S");
+	     sprintf(CmdInfo.szServerIP,"%s",ServerIP);
+	     CmdInfo.nPort = SvrPort;
+	   		
+	     if ( strcmp ( SvrUser, "jeusexm" ) == 0 ) {
+	        strcpy(CmdInfo.szCommand, "/appsw/swdpt/jeusexm/jeus7/domains/exm_domain/bin/restart_all.sh");
+	     } else {
+	        strcpy(CmdInfo.szCommand, "/appsw/swdpt/jeusims/jeus7/domains/ims_domain/bin/restart_all.sh");
+	     }
+   
+         /*LOG*/sprintf(gszLogMsg,"[JEUS RESTART] ecams_jeusstart start [%s][%s]", ServerIP,SvrUser );
+         eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);  
+         
+	     Server_Cmd_JOB(&CmdInfo);
+
+		 if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			continue;
+			/* 에레시 skip 처리? */
+			/*LOG*/sprintf(gszLogMsg,"[JEUS RESTART]  Shell 파일 전송 실패 [%s]",CmdInfo.szServerIP);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		 }
+		 else {
+			/*LOG*/sprintf(gszLogMsg,"[JEUS RESTART]  Shell 파일 전송 완료 [%s]",CmdInfo.szServerIP);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+         }
+
+/*       }*/
+    
+    }
+
+    /*LOG*/sprintf(gszLogMsg,"[JEUS RESTART] ecams_jeusstart Complete \n");
+    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);  
+    /* 완료후 프로그램 호출 */  
+	sprintf ( SysCmd, "sendmsg_1.sh" );
+	
+	ret = system(SysCmd)/256;
+	if( ret != 0 ) {
+	}       	         
+
+    /*LOG*/sprintf(gszLogMsg,"[JEUS RESTART] sendmsg.sh Program Start[Deploy After] [%s][%d]\n", SysCmd,ret );
+    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg); 	
+	exit(0);
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

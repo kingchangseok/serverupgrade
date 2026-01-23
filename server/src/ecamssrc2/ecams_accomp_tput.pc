@@ -1,0 +1,1113 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_accomp_tput.pc                         │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 신청자원의 Tar파일 적용서버로 전송           │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 20                                 │
+ ├──────┼───────────────────────┤
+ │ 작  정  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_accomp.h";
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+void 	Result_Make_TAR		();
+void  	CMR1011_Make_TAR 	();
+void 	FileSendErrChk_TAR	();
+
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : SYSCOM_Rsrc_Put_TAR                              */
+/*	Action    : 전송대상 TAR 파일을 대상서버로 적용              */
+/*  Parameter : pServerIP     : 서버주소                         */
+/*              nPort         : 사용포트                         */
+/*              pAcptNo       : 신청번호                         */
+/*              pSerNo        : 일련번호                         */
+/*              pSysCD        : 시스템코드                       */
+/*              pRsrcCD       : 프로그램종류                     */
+/*              pRsrcName     : 프로그램명                       */
+/*              pVolDir       : 디렉토리                         */
+/*              pReqCD        : 신청구분                         */
+/*              nSpoolGb      : 구분                             */
+/*              pPrcSys       : 처리구분                         */
+/*              pCmdInfo      : Socket 구조체                    */
+/*              pRstFile      : 처리결과파일                     */
+/*              pGubun        : 구분코드                         */
+/*              pSvrCd        : 서버구분                         */
+/*              pSvrSeq       : 서버일련번호                     */
+/*  Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	SYSCOM_Rsrc_Put_TAR	( char *pServerIP
+							, int   nPort
+							, char *pAcptNo
+							, char *pSerNo
+							, char *pSysCD
+							, char *pRsrcCD
+							, char *pRsrcName
+							, char *pVolDir
+							, char *pReqCD
+							, int   nSpoolGb
+							, char *pPrcSys
+							, CMD_INFO *pCmdInfo
+							, char *pRstFile
+							, char *pGubun
+							, char *pSvrCd
+							, int   pSvrSeq
+							)
+{
+char	szReqPath                [dfDir];
+char	szAgentDir               [dfDir];
+char	szSvrName              [dfSvrNM];
+char	remotePath          [dfFullPath];
+char	localPath           [dfFullPath];
+char	idxFile             [dfFullPath];
+char	szRstFile           [dfFullPath];
+int		nSerNo                          ;
+char	pRstCond             [dfRstCode];
+char	szSysOS                [dfSysOS];
+char    szSvrInfo                   [50];
+
+
+	nSerNo = atoi(pSerNo);
+
+
+		
+    /*-----------------------------------------------------------*/
+    /*  배포대상 파일 저장 PATH                                  */
+    /*-----------------------------------------------------------*/
+	SetTempDir("77" , szReqPath);
+	strcat(szReqPath, pAcptNo);
+	Local_Dir_Make(szReqPath);
+
+	sprintf(localPath, "%s", szReqPath);
+
+	EXEC SQL
+		SELECT  CM_DIR
+		      , CM_SVRNAME
+		      , CM_SYSOS
+		  INTO  :szAgentDir
+		  	  , :szSvrName
+		  	  , :szSysOS
+		  FROM  CMM0031
+		 WHERE  CM_SYSCD = :pSysCD
+		   AND  CM_SVRCD = :pSvrCd
+		   AND  CM_SVRIP = :pServerIP
+		   AND 	CM_SEQNO = :pSvrSeq;
+
+	if (sqlca.sqlcode != 0 ) {
+		/*LOG*/sprintf(gszLogMsg,"[%s][SYSTPT] AgentDir Get Err [%d][%s]", pAcptNo, sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		strcpy(pCmdInfo->szRstCond, "9999");
+		return;
+	}
+
+	NotUseDataTruncate (szAgentDir, 0x20);
+	NotUseDataTruncate (szSvrName , 0x20);
+	NotUseDataTruncate (szSysOS   , 0x20);
+
+	/*-----------------------------------------------------------*/
+	/*	소켓 버퍼사이즈 SET                                      */
+	/*-----------------------------------------------------------*/
+	if (Server_Buff_Size(pSysCD, pSvrCd, pSvrSeq) == FALSE) {
+		/*LOG*/sprintf(gszLogMsg,"[%s][%d][SYSTPT] serverinfo(Buffer Size) Get Err [%d][%s]", pAcptNo, nSerNo, sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		strcpy(pCmdInfo->szRstCond, "EROR");
+		return;
+	}
+
+	sprintf(pCmdInfo->szJobGub, "Z");
+	if (strcmp(szSysOS, dfWINDOWS) == 0) {
+		sprintf(remotePath,"%s\\%s_%s_%d", szAgentDir,pAcptNo,pSvrCd,pSvrSeq);
+		sprintf(pCmdInfo->szRemote, "%s\\%s_%s_%d.tar",remotePath,pAcptNo,pServerIP,pSvrSeq);
+	}
+	else {
+		sprintf(remotePath,"%s/%s_%s_%d", szAgentDir,pAcptNo,pSvrCd,pSvrSeq);
+		sprintf(pCmdInfo->szRemote, "%s/%s_%s_%d.tar",remotePath,pAcptNo,pServerIP,pSvrSeq);
+	}
+	sprintf(pCmdInfo->szLocal , "%s/%s_%s_%d.tar", localPath,pAcptNo,pServerIP,pSvrSeq);
+	Server_Cmd_JOB(pCmdInfo);
+
+	if (memcmp(pCmdInfo->szRstCond, "0000", 4) != 0) {
+		strcpy(pRstCond,pCmdInfo->szRstCond);
+		sprintf(idxFile,"%s/%s_%s_%d.idx",localPath,pAcptNo,pServerIP,pSvrSeq);
+		FileSendErrChk_TAR(idxFile,pSysCD,pServerIP,pAcptNo,pRstCond,szSvrName,pSvrCd,pSvrSeq,nSerNo,pPrcSys,nPort);
+	}
+
+	sleep(3);
+	sprintf(pCmdInfo->szJobGub,"G");
+	if (strcmp(szSysOS, dfWINDOWS) == 0) {
+		sprintf(pCmdInfo->szRemote, "%s\\%s_%s_%d.lsf",remotePath,pAcptNo,pServerIP,pSvrSeq);
+	}
+	else {
+		sprintf(pCmdInfo->szRemote, "%s/%s_%s_%d.lsf",remotePath,pAcptNo,pServerIP,pSvrSeq);
+	}
+	sprintf(pCmdInfo->szLocal , "%s/%s_%s_%d.lsf", localPath,pAcptNo,pServerIP,pSvrSeq);
+	Server_Cmd_JOB(pCmdInfo);
+	sprintf(szRstFile,"%s/%s.0.%s.%s.%d.befresult", gszTempPath, pAcptNo,pPrcSys,pSvrCd,pSvrSeq);
+	remove(szRstFile);  /*처리결과삭제 후 다시 시작*/
+	if (memcmp(pCmdInfo->szRstCond, "0000", 4) != 0) {
+		/*LOG*/sprintf(gszLogMsg,"[%s][0] ls -al 명령 결과 Get Fail[%s] [%s]",pAcptNo,pCmdInfo->szRemote,pServerIP);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		strcpy(pRstCond,pCmdInfo->szRstCond);
+		Result_Make_TAR(szRstFile,"ls -al 명령 결과 Get Fail",pServerIP,pPrcSys,pRstCond);
+		CMR1011_Make_TAR (pSysCD, pServerIP, pAcptNo, 0, szRstFile, nSerNo, pCmdInfo->szRstCond, szSvrName, pPrcSys ,pSvrCd,pSvrSeq);
+		return;
+	}
+
+	
+	if (access(pCmdInfo->szLocal,F_OK) == 0) {
+		sprintf(szSvrInfo,"%s:%d",pServerIP,nPort);
+		File_Merge(szRstFile, pCmdInfo->szLocal, szSvrInfo, "ls -al 명령 결과",1);
+		CMR1011_Make_TAR (pSysCD, pServerIP, pAcptNo, 0, szRstFile, nSerNo, "0000", szSvrName, pPrcSys ,pSvrCd,pSvrSeq);
+	}
+	else {
+		/*LOG*/sprintf(gszLogMsg,"[%s][0] ls -al 명령 결과 Get Fail[%s] [%s]",pAcptNo,pCmdInfo->szRemote,pServerIP);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		strcpy(pRstCond,pCmdInfo->szRstCond);
+		Result_Make_TAR(szRstFile,"ls -al 명령 결과 Get Fail",pServerIP,pPrcSys,pRstCond);
+		CMR1011_Make_TAR (pSysCD, pServerIP, pAcptNo, 0, szRstFile, nSerNo, pCmdInfo->szRstCond, szSvrName, pPrcSys ,pSvrCd,pSvrSeq);
+	}
+
+	sprintf(pCmdInfo->szJobGub,"G");
+	if (strcmp(szSysOS, dfWINDOWS) == 0 ) {
+		sprintf(pCmdInfo->szRemote, "%s\\%s_%s_%d.rst",remotePath,pAcptNo,pServerIP,pSvrSeq);
+	}
+	else {
+		sprintf(pCmdInfo->szRemote, "%s/%s_%s_%d.rst",remotePath,pAcptNo,pServerIP,pSvrSeq);
+	}
+	sprintf(pCmdInfo->szLocal , "%s/%s_%s_%d.rst", localPath,pAcptNo,pServerIP,pSvrSeq);
+	Server_Cmd_JOB(pCmdInfo);
+
+	if (memcmp(pCmdInfo->szRstCond, "0000", 4) == 0) {
+		FileSendErrChk_TAR(pCmdInfo->szLocal,pSysCD,pServerIP,pAcptNo,pRstCond,szSvrName,pSvrCd,pSvrSeq,nSerNo,pPrcSys,nPort);
+	}
+	else {
+		strcpy(pRstCond,pCmdInfo->szRstCond);
+	}
+
+	strcpy(pCmdInfo->szJobGub, "S");
+	if (strcmp(szSysOS, dfWINDOWS) == 0) {
+		sprintf(pCmdInfo->szCommand,"RD /S /Q \"%s\\%s_%s_%d\"",szAgentDir,pAcptNo,pSvrCd,pSvrSeq);
+	}
+	else {
+		sprintf(pCmdInfo->szCommand,"\\rm -rf '%s/%s_%s_%d'",szAgentDir,pAcptNo,pSvrCd,pSvrSeq);
+	}
+
+	Server_Cmd_JOB(pCmdInfo);
+
+	strcpy(pCmdInfo->szRstCond,pRstCond);
+
+	return;
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : Result_Make_TAR                                  */
+/*	Action    : 전송결과파일 작성                                */
+/*  Parameter : pRstFile   : 처리결과파일                        */
+/*              pcomment   : 서버주소                            */
+/*              pSvrIp     : 서버주소                            */
+/*              pPrcSys    : 처리구분                            */
+/*              pRstCond   : 처리결과                            */
+/*  Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	Result_Make_TAR	( char *pRstFile
+						, char *pcomment
+						, char *pSvrIp
+						, char *pPrcSys
+						, char *pRstCond
+						, int   nPort
+						)
+{
+FILE 	*RstPtr                         ;
+char	szSysDate                  [8+1];
+char 	szSysTime                 [14+1];
+char	szNSysDate	              [10+1];
+
+
+	Get_Sys_Date(szSysDate);
+	Conver_Date(szSysDate, szNSysDate);
+	Get_Sys_Time20(szSysTime);
+
+	RstPtr = fopen (pRstFile, "a+");
+	if (RstPtr == NULL)		return;
+	fprintf (RstPtr, ">>> SERVER [%s][%d] 작업처리내용 : [%s][%s %s]\n\n", pSvrIp, nPort, pPrcSys,szNSysDate,szSysTime );
+	fprintf (RstPtr, "%s\n",pcomment);
+	fprintf (RstPtr, "\n처리결과 = [%s]\n", pRstCond);
+	fclose  (RstPtr);
+
+}
+
+
+
+
+/*---------------------------------------------------------------*/
+/*  Function  : FileSendErrChk_TAR                               */
+/*	Action    : 전송결과파일 작성                                */
+/*	Parameter :	filename : 결과파일명                            */
+/*	            pSysCD   : 시스템코드                            */
+/*	            pSvrIP   : 서버주소                              */
+/*	            pAcptNo  : 신청번호                              */
+/*	            pRstCond : 처리결과                              */
+/*	            pSvrName : 서버명                                */
+/*	            pSvrCD   : 서버구분                              */
+/*              nPortNo  : 포트번호                              */
+/*	            nSysStep : 처리STEP                              */
+/*	            pPrcSys  : 처리단계                              */
+/*	            pSvrSeq  : 서버일련번호                          */
+/*  Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	FileSendErrChk_TAR	( char *filename
+							, char *pSysCD
+							, char *pSvrIP
+							, char *pAcptNo
+							, char *pRstCond
+							, char *pSvrName
+							, char *pSvrCD
+							, int   pSvrSeq
+							, int   nSysStep
+							, char *pPrcSys
+							, int   nPort
+							)
+							
+							
+{
+FILE 	*fptr                           ;
+char 	buff                      [2048];
+int	 	Index_key = 0                   ;
+char 	*szKeys                     [20];
+char 	*toktmp                         ;
+char 	errMsg                     [512];
+int	 	errFlag                         ;
+int	 	errnSerNo                       ;
+char 	errSerNo                     [5];
+char 	szRstFile           [dfFullPath];
+int	 	errIdx                          ;
+struct 	stat f_st                       ;
+char 	getFileName         [dfFullPath];
+char 	szFilePath          [dfFullPath];
+char 	nRet                            ;
+char 	szSearchkey                [512];
+char 	szSearchTmp                [512];
+char 	szSearchTmp2               [512];
+
+
+
+	/*LOG*/sprintf(gszLogMsg,"[%s][%s][%s][%d] FileSendErrChk_TAR START 1 [%s] ",pSvrName, pPrcSys, pSvrCD, pSvrSeq,filename);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+	/*-----------------------------------------------------------*/
+	/*	처리결과 파일 위치                                       */
+	/*-----------------------------------------------------------*/
+	SetTempDir("77", szFilePath);
+	strcat (szFilePath,pAcptNo);		
+	
+	if (Char_Check(filename,".rst") >=0) {
+		errFlag = 1;
+	}
+	else {
+		errFlag = 0;
+	}
+	
+	fptr = fopen (filename,"r");	
+	if (fptr == NULL)
+		return;
+	
+	while (fgets(buff, 2048, fptr) != (char *) NULL) {
+
+		if (strlen(buff) ==0){
+		   break;
+		}
+			
+        /*-------------------------------------------------------*/
+    	/* Return Valure Truncate                                */
+        /*-------------------------------------------------------*/
+        sprintf(buff, "%s", rep_char(buff,"\r\n", ""));
+        sprintf(buff, "%s", rep_char(buff,"\n"  , ""));
+		sprintf(buff, "%s", trunc_char(buff));
+
+		Index_key = 0;
+		while(1){
+			if (Index_key == 0)
+				szKeys[Index_key] = (char *)strtok_r(buff,(char *)"|",(char **)&toktmp);
+			else
+				szKeys[Index_key] = (char *)strtok_r(NULL,(char *)"|",(char **)&toktmp);
+			
+			if (szKeys[Index_key] == NULL)
+				break;
+			Index_key++;
+		}
+		if (Index_key == 0) {
+			fprintf(stderr,"Index_key == 0\n");
+			return;
+		}
+		memset(errSerNo,0x00,sizeof(errSerNo));
+		strcpy(errSerNo,szKeys[0]+Char_Check(szKeys[0],pAcptNo)+strlen(pAcptNo)+1);
+		errnSerNo = atoi(errSerNo);
+	
+		sprintf(szRstFile,"%s/%s.%d.%s.%s.%d.befresult", gszTempPath, pAcptNo, errnSerNo,pPrcSys,pSvrCD,pSvrSeq);		
+		if (errFlag == 0) {
+			/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] Tar 파일 전송 에러 TPUT [%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0]);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			
+			sprintf(errMsg,"Tar 파일 전송 에러 - 서버IP:Port [%s:%d] ",pSvrIP,nPort);			
+			Result_Make_TAR(szRstFile,"Tar 파일 전송 에러 ",pSvrIP,pPrcSys,pRstCond,nPort);
+			CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);
+		}
+		else {
+			if (Index_key < 9) {
+				if (strcmp(szKeys[4],"0") == 0) {
+					sprintf(getFileName,"%s/%s",szFilePath,szKeys[0]);					
+					if(stat(getFileName,&f_st) < 0) {
+						/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 수신 실패-[%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0]);
+						eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					
+						strcpy(pRstCond,"EROR");					
+						sprintf(errMsg,"파일 수신 실패- 서버IP:Port [%s:%d] 파일:%s/%s ",pSvrIP,nPort,szKeys[2],szKeys[1]);
+						Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+						CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);			
+					}
+					else {
+						if (f_st.st_size == 0) {
+							/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 수신 완료 - FILE SIZE ZERO -[%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0]);
+							eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+						
+							strcpy(pRstCond,"EROR");						
+							sprintf(errMsg,"파일 수신 완료 - FILE SIZE ZERO - 서버IP:Port [%s:%d] 파일:%s/%s ",pSvrIP,nPort,szKeys[2],szKeys[1]);
+							Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+							CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);			
+						}
+						else {
+							/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 수신 완료-[%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0]);
+							eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+						
+							strcpy(pRstCond,"0000");						
+							sprintf(errMsg,"파일 수신 완료- 서버IP:Port [%s:%d] 파일:%s/%s ",pSvrIP,nPort,szKeys[2],szKeys[1]);
+							Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+							CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);										
+						}
+					}
+				}
+				else 
+				if (strcmp(szKeys[4],"2") == 0) {
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 MD5 불일치 [%s] tarGetMD5[%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0],szKeys[5]);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					
+					strcpy(pRstCond,"EROR");						
+					sprintf(errMsg,"파일 MD5 불일치- 서버IP:Port [%s:%d] 파일:%s/%s 수신전MD5:[%s] 수신후MD5:[%s]",pSvrIP,nPort,szKeys[2],szKeys[1],szKeys[3],szKeys[5]);
+					Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+					CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);				
+				}				
+				else {
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 수신 실패 [%s]  \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0]);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					
+					strcpy(pRstCond,"EROR");						
+					sprintf(errMsg,"파일 수신 실패- 서버IP:Port [%s:%d] 파일:%s/%s #해당서버의 파일유무, 권한(read/write)을 확인하여 주십시요.#",pSvrIP,nPort,szKeys[2],szKeys[1]);
+					Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+					CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);						
+				}
+			}
+			else {
+				if (strcmp(szKeys[10],"0") == 0) {
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 전송 완료 [%s] [%s]\n",pAcptNo,errnSerNo,pPrcSys,szKeys[0],errSerNo);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				
+					strcpy(pRstCond,"0000");				
+					sprintf(errMsg,"파일 전송 완료- 서버IP:Port [%s:%d] 파일:%s/%s ",pSvrIP,nPort,szKeys[2],szKeys[1]);
+					Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+					CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);			
+				}
+				else 
+				if (strcmp(szKeys[10],"1") == 0) {
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 전송 실패 [%s] command[%s] ret[%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0],szKeys[10],szKeys[11]);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					
+					strcpy(pRstCond,"EROR");						
+					sprintf(errMsg,"파일 전송 실패- 서버IP:Port [%s:%d] 파일:%s/%s Command=[%s] Ret=[%s] #해당서버의 파일, 해당디렉토리의 권한을 확인하여 주십시요.#",pSvrIP,nPort,szKeys[2],szKeys[1],szKeys[10],szKeys[11]);
+					Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+					CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);
+				}
+				else 
+				if (strcmp(szKeys[10],"2") == 0){
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 MD5 불일치 [%s] tarGetMD5[%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0],szKeys[10]);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					
+					strcpy(pRstCond,"EROR");	
+					
+					sprintf(errMsg,"파일 MD5 불일치- 서버IP:Port [%s:%d] 파일:%s/%s 정송전MD5:[%s] 전송후MD5:[%s]",pSvrIP,nPort,szKeys[2],szKeys[1],szKeys[3],szKeys[10]);
+					Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+					CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);				
+				}
+				else 
+				if (strcmp(szKeys[10],"3") == 0) {				   
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 파일 속성 변경 실패 [%s] command[%s] ret[%s] \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0],szKeys[10],szKeys[11]);
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+					
+					if (strcmp(pPrcSys,"SYSDN") == 0 || strcmp(pPrcSys,"SYSDNC") == 0) {
+						strcpy(pRstCond,"0000");				
+						sprintf(errMsg,"파일 전송 완료- 서버IP:Port [%s:%d] 파일:%s/%s ",pSvrIP,nPort,szKeys[2],szKeys[1]);
+						Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+						CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);				
+					} else {
+						strcpy(pRstCond,"EROR");						
+						sprintf(errMsg,"파일속성 변경 실패- 서버IP:Port [%s:%d] 파일:%s/%s Command=[%s] Ret=[%s] ",pSvrIP,nPort,szKeys[2],szKeys[1],szKeys[10],szKeys[11]);
+						Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+						CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);
+					}
+				}
+				else {
+					/*LOG*/sprintf(gszLogMsg,"[%s][%d][%s] 해당파일 없음 [%s][%s]  \n",pAcptNo,errnSerNo,pPrcSys,szKeys[0],szKeys[9]);
+					
+					strcpy(pRstCond,"EROR");						
+					sprintf(errMsg,"해당파일 없음- 서버IP:Port [%s:%d] 파일:%s/%s Command=[%s] Ret=[%s] ",pSvrIP,nPort,szKeys[2],szKeys[1],szKeys[10],szKeys[11]);
+					Result_Make_TAR(szRstFile,errMsg,pSvrIP,pPrcSys,pRstCond,nPort);
+					CMR1011_Make_TAR (pSysCD, pSvrIP, pAcptNo, errnSerNo, szRstFile, nSysStep, pRstCond, pSvrName,pPrcSys,pSvrCD,pSvrSeq);						
+				}
+			}
+		}
+	}
+	fclose(fptr);
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : CMR1011_Make_TAR                                 */
+/*	Action    : 처리결과를 해당테이블에 기록(CMR1011)            */
+/*	Parameter :	pSysCD    : 시스템코드                           */
+/*	            pServerIP : 서버주소                             */
+/*	            pAcptNo   : 신청번호                             */
+/*	            pSerNo    : 일련번호                             */
+/*	            pRstFile  : 처리결과파일                         */
+/*	            nSpoolGb  : 처리결과구분(STEP)                   */
+/*	            pRstCond  : 처리결과                             */
+/*	            pSvrName  : 서버이름                             */
+/*	            pWorkID   : 작업구분                             */
+/*	            pSvrCD    : 서버구분                             */
+/*	            pSvrSeq   : 서버일련번호                         */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	CMR1011_Make_TAR	( char *pSysCD
+							, char *pServerIP
+							, char *pAcptNo
+							, int   nSerNo
+							, char *pRstFile
+							, int   nSpoolGb
+							, char *pRstCond
+							, char *pSvrName
+							, char *pWorkID
+							, char *pSvrCD
+							, int   pSvrSeq
+							)
+{
+int 	res                             ;
+char 	szRstFileName       [dfFullPath];
+char 	szCmd         [dfFullPath + 100];
+char 	szDir05                  [dfDir];
+int 	nRet                            ;
+int		nCnt                            ;
+char 	szQryCD                [dfReqCD];
+char	szRstCode            [dfRstCode];
+char	szNewRstFile        [dfFullPath];
+char	szDbRstName	        [dfFullPath];
+char	szPassOK                   [1+1];
+char szYYYYMM[7];
+	
+	
+	/*LOG*/sprintf(gszLogMsg,"ACCT_LIB : CMR1011_Make_TAR START : [%s] [%d] [%s] [%s] [%s] [%s] [%s] [%d] [%s] [%s] [%d]"
+													, pAcptNo, nSerNo, pSysCD, pWorkID, pServerIP,pRstCond
+													, pRstFile, nSpoolGb, pSvrName,pSvrCD, pSvrSeq );
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+    memset(szDir05      , 0x00, sizeof(szDir05      ));
+    memset(szRstFileName, 0x00, sizeof(szRstFileName));
+    
+	/*-----------------------------------------------------------*/
+	/* 	신청 구분을 조회 										 */
+	/*-----------------------------------------------------------*/	
+	EXEC SQL
+		SELECT  CR_QRYCD 
+		      , CR_PASSOK
+		      , TO_CHAR(SYSDATE,'YYYYMM') 
+		  INTO  :szQryCD
+		  	  , :szPassOK
+		  	  , :szYYYYMM
+		  FROM  CMR1000 
+		 WHERE  CR_ACPTNO = :pAcptNo;
+		 	
+	NotUseDataTruncate (szQryCD , 0x20);
+	NotUseDataTruncate (szPassOK, 0x20);
+	NotUseDataTruncate (szYYYYMM, 0x20);
+	
+	strcpy(szRstFileName, pRstFile);
+	while( (nRet = Char_Check(szRstFileName,"/")+1) > 0) {
+		sprintf(szRstFileName, "%s", right_char(szRstFileName,strlen(szRstFileName)-nRet));
+	}	
+	sprintf(szRstFileName,"%s", rep_char(szRstFileName,".result",""));
+	sprintf(szRstFileName,"%s.%s",szRstFileName,pWorkID);	
+	
+	/*-----------------------------------------------------------*/
+	/* 처리 결과 저장할 디렉토리 경로 생성                       */
+	/*-----------------------------------------------------------*/
+	SetTempDir("11", szDir05);
+
+	sprintf(szDir05, "%s/%s", szDir05,szYYYYMM);
+	if (access(szDir05,F_OK) != 0) {
+		Local_Dir_Make(szDir05);
+	}
+	sprintf(szNewRstFile,"%s/%s",szDir05, szRstFileName);
+
+	/*-----------------------------------------------------------*/
+	/* 처리결과 파일 처리결과파일 디렉토리로                     */
+	/*-----------------------------------------------------------*/
+	memset(szDbRstName,0x00,sizeof(szDbRstName));
+	if (strlen(pRstFile) > 0 && access(pRstFile, F_OK) >= 0) {
+		if (access(szNewRstFile,F_OK) != 0) {
+			sprintf(szCmd,"mv  '%s' '%s'", pRstFile, szNewRstFile);
+			system(szCmd);
+		}
+		else {
+			File_Merge(szNewRstFile, pRstFile, pServerIP, "",2);
+		}
+	}
+	sprintf(szDbRstName,"%s/%s",szYYYYMM, szRstFileName);	
+	
+	/*-----------------------------------------------------------*/
+	/* 	정상 처리   										     */
+	/*-----------------------------------------------------------*/
+	if (strcmp(pWorkID,"SYSDN" ) == 0 || 
+		strcmp(pWorkID,"SYSCN" ) == 0 || 
+		strcmp(pWorkID,"SYSPF" ) == 0 ||
+		strcmp(pWorkID,"SYSUP" ) == 0 || 
+		strcmp(pWorkID,"SYSDNC") == 0 || 
+		strcmp(pWorkID,"SYSANL") == 0 ||
+		strcmp(pWorkID,"SYSAL" ) == 0 || 
+		strcmp(pWorkID,"SYSRM" ) == 0 ||  
+		strcmp(pWorkID,"SYSSF" ) == 0 || 
+		strcmp(pWorkID,"SYSFMK") == 0 ) {
+		if (strlen(pServerIP) == 0)		return;
+
+	    nCnt = 0;		     
+	    
+	    /*-------------------------------------------------------*/
+	    /*    CMR1011 (처리결과) 존재여부 Check                  */
+	    /*-------------------------------------------------------*/
+	    EXEC SQL
+	    	SELECT  Count(*)
+	          INTO  :nCnt
+	          FROM  CMR1011
+			 WHERE  CR_AcptNo = :pAcptNo
+			   AND  CR_SerNo  = :nSerNo
+			   AND  CR_SysCD  = :pSysCD
+			   AND  CR_PrcSys = :pWorkID
+			   AND  CR_IPAddr = :pServerIP
+			   AND	CR_SVRCD  = :pSvrCD
+			   AND	CR_SVRSEQ = :pSvrSeq
+			   AND  CR_RUNGBN = 'B';
+
+	    if (sqlca.sqlcode != 0)
+	    	nCnt = 0;
+	    	
+	    
+	    if (nCnt > 0) {
+	    	if (strlen(szDbRstName) > 0){
+				EXEC SQL 
+					UPDATE  CMR1011
+					   SET  CR_PrcRst  = DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, '0000', '0000'
+					   	                                                            , 'NONE', '0000'
+					   	                                                            , 'WAIT'
+					   	                                                  )
+					                                    , DECODE(:pRstCond, '0000', '0000', 'WAIT')
+					                           )
+						  , CR_PutCode = DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, 'NONE', '0000'
+					   	                                                             , :pRstCond
+					   	                                                   )
+					                                     , :pRstCond
+					                            )
+						  , CR_PrcDate = SYSDATE  
+						  , CR_RstFile = :szDbRstName
+						  , CR_WAIT    = DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, '0000', '0'
+					   	                                                            , 'NONE', '0'
+					   	                                                            , 'W'
+					   	                                                  )
+					                                    , DECODE(:pRstCond, '0000', '0', 'W')
+					                           )
+					 WHERE  CR_AcptNo = :pAcptNo
+					   AND  CR_SerNo  = :nSerNo
+					   AND  CR_SysCD  = :pSysCD
+					   AND  CR_PrcSys = :pWorkID
+					   AND  CR_IPAddr = :pServerIP
+					   AND	CR_SVRCD  = :pSvrCD
+					   AND	CR_SVRSEQ = :pSvrSeq
+					   AND  CR_RUNGBN = 'B';	
+			}
+			else{
+				EXEC SQL 
+					UPDATE  CMR1011
+					   SET  CR_PrcRst  = DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, '0000', '0000'
+					   	                                                            , 'NONE', '0000'
+					   	                                                            , 'WAIT'
+					   	                                                  )
+					                                    , DECODE(:pRstCond, '0000', '0000', 'WAIT')
+					                           )
+		   			      , CR_PutCode = DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, 'NONE', '0000'
+					   	                                                             , :pRstCond
+					   	                                                   )
+					                                     , :pRstCond
+					                            )
+					      , CR_PrcDate = SYSDATE
+					      , CR_WAIT    = DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, '0000', '0'
+					   	                                                            , 'NONE', '0'
+					   	                                                            , 'W'
+					   	                                                  )
+					                                    , DECODE(:pRstCond, '0000', '0', 'W')
+					                           )
+					 WHERE  CR_AcptNo = :pAcptNo
+					   AND  CR_SerNo  = :nSerNo
+					   AND  CR_SysCD  = :pSysCD
+					   AND  CR_PrcSys = :pWorkID
+					   AND  CR_IPAddr = :pServerIP
+					   AND	CR_SVRCD  = :pSvrCD
+					   AND	CR_SVRSEQ = :pSvrSeq
+					   AND  CR_RUNGBN = 'B';					
+			}
+		}
+		
+		/*-------------------------------------------------------*/
+	    /*    CMR1011 (처리결과) NOT FOUND 면 INSERT             */
+	    /*-------------------------------------------------------*/	    
+	    else {
+	    	while (1) {
+		    	EXEC SQL
+		    		SELECT  NVL(MAX(CR_SEQNO), 0) + 1
+		          	  INTO  :nCnt
+		          	  FROM  CMR1011
+				 	 WHERE  CR_AcptNo = :pAcptNo;
+				 	 
+				if (sqlca.sqlcode == 1403)
+					nCnt = 1;
+	
+				EXEC SQL
+		       		INSERT INTO CMR1011
+						( CR_ACPTNO
+						, CR_SEQNO
+						, CR_SERNO   
+						, CR_SYSCD   
+						, CR_IPADDR  
+						, CR_PRCDATE 
+						, CR_RSTFILE 
+						, CR_PRCRST  
+						, CR_PRCSYS  
+						, CR_PUTCODE
+						, CR_WAIT
+	 					, CR_SVRNAME
+	 					, CR_SVRCD
+	 					, CR_SVRSEQ
+	 					, CR_RUNGBN
+						)
+					VALUES
+						( :pAcptNo
+	                    , :nCnt
+						, :nSerNo
+						, :pSysCD
+						, :pServerIP
+						, SYSDATE
+						, :szDbRstName
+						, DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, '0000', '0000'
+	   	                                                            , 'NONE', '0000'
+	   	                                                            , 'WAIT'
+	   	                                                  )
+	                                    , DECODE(:pRstCond, '0000', '0000', 'WAIT')
+	                           )
+						, :pWorkID
+						, DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, 'NONE', '0000'
+	   	                                                             , :pRstCond
+	   	                                                   )
+	                                     , :pRstCond
+	                            )
+						, DECODE(:pWorkID, 'SYSANL', DECODE(:pRstCond, '0000', '0'
+	   	                                                            , 'NONE', '0'
+	   	                                                            , 'W'
+	   	                                                  )
+	                                    , DECODE(:pRstCond, '0000', '0', 'W')
+	                           )
+						, :pSvrName
+						, :pSvrCD
+						, :pSvrSeq
+						, 'B'
+						);
+				
+				if (sqlca.sqlcode == 0)	{		
+					break;
+				}
+				else {
+					
+					printf("<%s><%s><%s><%s><%s><%s><%s>\n", pAcptNo, pSysCD, pServerIP, szDbRstName, pWorkID, pSvrName, pSvrCD);
+					
+					
+					/* sprintf(gszLogMsg,"<%s><%s><%s><%s><%s><%s><%s>CMR1011 작성실패 2:sqlcaa.sqlcode=[%d] sqlca.sqlerrm.sqlerrmc =[%s]\n",pAcptNo, pSysCD, pServerIP, szDbRstName, pWorkID, pSvrName, pSvrCD,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);*/
+					sprintf(gszLogMsg,"<%s><%d><%d><%s><%s><%s><%s><%s><%s><%d>CMR1011 작성실패 2:sqlcaa.sqlcode=[%d] sqlca.sqlerrm.sqlerrmc =[%s]\n",pAcptNo, nCnt, nSerNo, pSysCD, pServerIP, szDbRstName, pWorkID,pSvrName,pSvrCD,pSvrSeq ,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);					
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				}
+			}
+	    }
+	    
+	    if (sqlca.sqlcode != 0) {
+			strcpy(pRstCond , "ERROR");
+			/*LOG*/sprintf(gszLogMsg,"CMR1011 작성실패 2: [%s][%d][%s] RstCond[%s] [%d] [%s]\n",
+					pAcptNo, nSerNo, pWorkID,   pRstCond, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return;
+		}
+	}
+	
+	/*------------------------------------------------------------*/
+	/*  <<<<  SYSCB 처리  >>>>                                    */
+	/*------------------------------------------------------------*/
+	else 
+	if (strcmp(pWorkID,"SYSCB") == 0 || 
+		strcmp(pWorkID,"SYSAR") == 0 || 
+		strcmp(pWorkID,"SYSCCB") == 0 || 
+		strcmp(pWorkID,"SYSUA") == 0 || 
+		strcmp(pWorkID,"SYSCF") == 0 || 
+		strcmp(pWorkID,"SYSPC") == 0 || 
+		strcmp(pWorkID,"SYSAC") == 0 ||
+		strcmp(pWorkID,"SYSSF") == 0 || 
+		strcmp(pWorkID,"SYSFT") == 0 ) {
+	    nCnt = 0;		      
+	    EXEC SQL
+	    	SELECT  Count(*)
+	          INTO  :nCnt
+	          FROM  CMR1011
+			 WHERE  CR_AcptNo = :pAcptNo
+			   AND  CR_SerNo  = :nSerNo
+			   AND  CR_SysCD  = :pSysCD
+			   AND  CR_PrcSys = :pWorkID
+			   AND  CR_IPAddr = :pServerIP
+			   AND	CR_SVRCD  = :pSvrCD
+			   AND	CR_SVRSEQ = :pSvrSeq
+			   AND  CR_RUNGBN = 'B';
+
+	    if (sqlca.sqlcode != 0)
+	    	nCnt = 0;
+            
+    	if (nCnt > 0) {
+	    	if (strlen(szDbRstName) > 0){
+				EXEC SQL
+					UPDATE  CMR1011
+					   SET  CR_PrcRst  = :pRstCond 
+					   	  , CR_RstFile = :szDbRstName
+					   	  , CR_PrcDate = SYSDATE
+					   	  , CR_PUTCODE = :pRstCond
+					   	  , CR_Wait    = decode(:pRstCond,'0000','0','W')
+					   	  , CR_SvrName = :pSvrName
+					 WHERE  CR_AcptNo  = :pAcptNo
+					   AND  CR_SERNO   = :nSerNo
+					   AND  CR_SysCD   = :pSysCD
+					   AND  CR_PrcSys  = :pWorkID
+					   AND	CR_SVRCD   = :pSvrCD
+					   AND	CR_SVRSEQ  = :pSvrSeq
+					   AND  CR_IPAddr  = :pServerIP
+					   AND  CR_RUNGBN  = 'B';			
+			}
+			else {
+				EXEC SQL
+					UPDATE  CMR1011
+					   SET  CR_PrcRst  = :pRstCond 
+					   	  , CR_PrcDate = SYSDATE
+					   	  , CR_PUTCODE = :pRstCond
+					   	  , CR_Wait    = decode(:pRstCond,'0000','0','W')
+					   	  , CR_SvrName = :pSvrName
+					 WHERE  CR_AcptNo  = :pAcptNo
+					   AND  CR_SERNO   = :nSerNo
+					   AND  CR_SysCD   = :pSysCD
+					   AND  CR_PrcSys  = :pWorkID
+					   AND	CR_SVRCD   = :pSvrCD
+					   AND	CR_SVRSEQ  = :pSvrSeq
+					   AND  CR_IPAddr  = :pServerIP
+					   AND  CR_RUNGBN  = 'B';			
+			}				   	
+    	}		
+    	else {
+			while (1) {
+	    		EXEC SQL
+					SELECT  NVL(MAX(CR_SEQNO), 0) + 1
+		  			  INTO  :nCnt
+		  			  FROM  CMR1011
+		 			 WHERE  CR_AcptNo = :pAcptNo;
+			 	 
+				if (sqlca.sqlcode == 1403)
+					nCnt = 1;
+	
+				EXEC SQL
+					INSERT INTO CMR1011
+						( CR_ACPTNO
+						, CR_SEQNO
+						, CR_SERNO   
+						, CR_SYSCD   
+						, CR_IPADDR  
+						, CR_PRCDATE 
+						, CR_RSTFILE 
+						, CR_PRCRST  
+						, CR_PRCSYS  
+						, CR_PUTCODE
+						, CR_WAIT
+						, CR_SVRNAME
+						, CR_SVRCD
+						, CR_SVRSEQ
+						, CR_RUNGBN
+						)
+					VALUES
+						( :pAcptNo
+						, :nCnt
+						, :nSerNo
+						, :pSysCD
+						, :pServerIP
+						, SYSDATE
+						, :szDbRstName
+						, DECODE(:pRstCond, '0000', '0000', 'WAIT')
+						, :pWorkID
+						, :pRstCond
+						, DECODE(:pRstCond, '0000', '0', 'W')
+						, :pSvrName
+						, :pSvrCD
+						, :pSvrSeq
+						, 'B'
+						);
+						
+					if (sqlca.sqlcode == 0)	
+					    break;
+					else {
+						printf("[%d][%s] nCnt=[%d]\n",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,nCnt);
+					}
+			}
+    	}
+	}
+
+	/*-----------------------------------------------------------*/
+	/*                   <<<<  SYSED   >>>>                      */
+	/*-----------------------------------------------------------*/
+	else 
+	if (strcmp(pWorkID,"SYSTS" ) == 0 ||
+		strcmp(pWorkID,"SYSED" ) == 0 ||
+		strcmp(pWorkID,"SYSCED") == 0 ||
+		strcmp(pWorkID,"SYSRC" ) == 0 ) {
+	    nCnt = 0;
+	    memset(szRstCode, 0x00, sizeof(szRstCode));
+	    
+	    EXEC SQL
+	    	SELECT  CR_PRCRST
+	          INTO  :szRstCode
+	          FROM  CMR1011
+			 WHERE  CR_AcptNo = :pAcptNo
+			   AND  CR_SerNo  = :nSerNo
+			   AND  CR_SysCD  = :pSysCD
+			   AND  CR_PrcSys = :pWorkID
+			   AND  CR_IPAddr = :pServerIP
+			   AND	CR_SVRCD  = :pSvrCD
+			   AND	CR_SVRSEQ = :pSvrSeq
+			   AND  CR_RUNGBN = 'B';
+
+		if (sqlca.sqlcode == 1403)
+			nCnt = 0;
+		else
+			nCnt = 1;
+			
+	    if (sqlca.sqlcode != 0) {
+			/*LOG*/sprintf(gszLogMsg,"ACCT : CMR1011_Make NOT FOUND : [%s] [%d] [%s] [%s] [%s] [%d]"
+							, pAcptNo, nSerNo, pSysCD, pWorkID, pServerIP, sqlca.sqlcode);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		}
+		
+		NotUseDataTruncate(szRstCode, 0x20);
+	    
+		/*LOG*/sprintf(gszLogMsg,"ACCT : CMR1011_Make CHECK : [%s][%d][%s][%s][%s] -> [%s][%s] [%d]",
+								pAcptNo, nSerNo, pSysCD, pWorkID, pServerIP, szRstCode, pRstCond, nCnt);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	    
+	    if (strlen(szRstCode) > 0) {
+	    	if (strcmp(szRstCode, "0000") != 0) {
+				/*LOG*/sprintf(gszLogMsg,"ACCT : CMR1011_Make ERROR SKIP : [%s][%d][%s] [%s]",
+										pAcptNo, nSerNo, szRstCode, pRstCond);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return;
+	    	}
+	    }
+	    
+	    if (nCnt > 0) {
+			/*LOG*/sprintf(gszLogMsg,"ACCT : CMR1011_Make UPDATE : [%s][%d][%s][%s][%s] -> [%s][%s] [%d]",
+									pAcptNo, nSerNo, pSysCD, pWorkID, pServerIP, szRstCode, pRstCond, nCnt);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+	    	if (strlen(szDbRstName) > 0){
+				EXEC SQL
+					UPDATE  CMR1011
+					   SET  CR_PrcRst  = DECODE(:pRstCond, '0000', '0000', 'WAIT') 
+					   	  , CR_RstFile = :szDbRstName
+					   	  , CR_PrcDate = SYSDATE
+					   	  , CR_PUTCODE = :pRstCond
+					   	  , CR_Wait    = DECODE(:pRstCond,'0000','0','W')
+					   	  , CR_SvrName = :pSvrName							
+					 WHERE  CR_AcptNo  = :pAcptNo
+					   AND  CR_SERNO   = :nSerNo
+					   AND  CR_SysCD   = :pSysCD
+					   AND  CR_PrcSys  = :pWorkID
+					   AND  CR_IPAddr  = :pServerIP
+					   AND	CR_SVRCD  = :pSvrCD
+					   AND	CR_SVRSEQ = :pSvrSeq
+					   AND  CR_RUNGBN = 'B';
+			}
+			else {
+				EXEC SQL
+					UPDATE  CMR1011
+					   SET  CR_PrcRst  = DECODE(:pRstCond, '0000', '0000', 'WAIT') 
+					      , CR_PrcDate = SYSDATE
+					      , CR_PUTCODE = :pRstCond
+					      , CR_Wait    = DECODE(:pRstCond,'0000','0','W')
+					      , CR_SvrName = :pSvrName							
+					 WHERE  CR_AcptNo  = :pAcptNo
+					   AND  CR_SERNO   = :nSerNo
+					   AND  CR_SysCD   = :pSysCD
+					   AND  CR_PrcSys  = :pWorkID
+					   AND  CR_IPAddr  = :pServerIP
+					   AND	CR_SVRCD   = :pSvrCD
+					   AND	CR_SVRSEQ  = :pSvrSeq
+					   AND  CR_RUNGBN  = 'B';		
+			}				   					   	
+		}
+		else  {
+			while (1) {
+		    	EXEC SQL
+		    		SELECT  NVL(MAX(CR_SEQNO), 0) + 1
+		          	  INTO  :nCnt
+		          	  FROM  CMR1011
+				 	 WHERE  CR_AcptNo = :pAcptNo;
+					 	 
+				if (sqlca.sqlcode == 1403)
+					nCnt = 1;
+		
+				/*LOG*/sprintf(gszLogMsg,"ACCT : CMR1011_Make INSERT : [%s][%d][%s][%s][%s] -> [%s][%s] [%d]",
+										pAcptNo, nSerNo, pSysCD, pWorkID, pServerIP, szRstCode, pRstCond, nCnt);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	
+				EXEC SQL
+					INSERT INTO CMR1011
+						(  CR_ACPTNO
+						, CR_SEQNO
+						, CR_SERNO   
+						, CR_SYSCD   
+						, CR_IPADDR  
+						, CR_PRCDATE 
+						, CR_RSTFILE 
+						, CR_PRCRST  
+						, CR_PRCSYS  
+						, CR_PUTCODE
+						, CR_WAIT
+	 					, CR_SVRNAME
+	 					, CR_SVRCD
+	 					, CR_SVRSEQ
+	 					, CR_RUNGBN
+						)
+					VALUES
+						( :pAcptNo
+		                , :nCnt
+						, :nSerNo
+						, :pSysCD
+						, :pServerIP
+						, SYSDATE
+						, :szDbRstName
+						, DECODE(:pRstCond, '0000', '0000', 'WAIT')
+						, :pWorkID
+						, :pRstCond
+						, DECODE(:pRstCond, '0000', '0', 'W')
+						, :pSvrName
+						, :pSvrCD
+						, :pSvrSeq
+						, 'B'
+						);
+					
+				if (sqlca.sqlcode == 0)		break;
+				/*LOG*/sprintf(gszLogMsg,"ACCT : CMR1011_Make ERROR : [%d][%s]",	sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			}
+		}
+	}
+	
+	if (sqlca.sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"ACCT : CMR1011_Make_TAR ERROR : [%s] [%d] [%s] [%s] [%s] [%d]"
+									, pAcptNo, nSerNo, pSysCD, pWorkID, pServerIP, sqlca.sqlcode);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		memset(szRstCode, 0x00, sizeof(szRstCode));
+	}
+	EXEC SQL COMMIT;
+
+	/*-------------------------------------------------------*/
+	/*    CMR1010  처리결과 update							 */
+	/*-------------------------------------------------------*/	
+	if (nSerNo != 0) {
+		if (strcmp(pWorkID, "SYSANL") == 0) {
+			EXEC SQL 
+				UPDATE  CMR1010
+				   SET  CR_PUTCODE = DECODE(:pRstCond, 'NONE', '0000', :pRstCond)
+				   	  , CR_SYSSTEP = :nSpoolGb
+				   	  , CR_ANALYN  = DECODE(CR_ANALYN, 'N', CR_ANALYN, DECODE(:pRstCond, '0000', 'N'
+				   	  	                                                               , 'NONE', 'X'
+				   	  	                                                                       , 'E'
+				   	  	                                                     )
+				   	  	                   )
+				  WHERE  CR_AcptNo = :pAcptNo
+				  	AND  CR_BASEITEM = (SELECT  CR_BASEITEM
+				  	                      FROM  Cmr1010
+				  	                     WHERE  CR_Acptno = :pAcptNo
+				  	                   	   AND  CR_SerNo  = :nSerNo
+				  	                   );
+		} 
+		else {
+			EXEC SQL 
+				UPDATE  CMR1010
+				   SET  CR_PutCode = (SELECT  DECODE(COUNT(*), 0, '0000', 'WAIT')
+				                        FROM  CMR1011
+				                       WHERE  CR_ACPTNO=:pAcptNo
+				                         AND  CR_SERNO=:nSerNo
+				                         AND  CR_PRCSYS=:pWorkID
+				                         AND  NVL(CR_PUTCODE,'0000')<>'0000'
+				                     )
+				      , CR_SYSSTEP = :nSpoolGb
+				 WHERE  CR_AcptNo = :pAcptNo
+				   AND  CR_SerNo  = :nSerNo;
+		}
+		
+		if (sqlca.sqlcode != 0) {
+			strcpy(pRstCond , "ERROR");
+			/*LOG*/sprintf(gszLogMsg,"CMR1010 update 실패 : [%s][%d][%s] RstCond[%s] [%d] [%s]",
+							pAcptNo, nSerNo, pWorkID,  pRstCond, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return;
+		}
+	}	
+	EXEC SQL COMMIT;
+
+	/*LOG*/sprintf(gszLogMsg,"CMR1011_Make_TAR END : [%s] [%d] [%s] [%s] [%s] [%s]"
+													, pAcptNo, nSerNo, pSysCD, pWorkID, pServerIP,pRstCond);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

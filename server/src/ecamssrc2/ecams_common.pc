@@ -1,0 +1,1386 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_common.pc                              │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 형상관리 Pro*C 공통 처리 모듈                │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 07. 11                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include <ecams_util.h>
+#include <ecamsapi.h>
+
+EXEC SQL INCLUDE "ecams_accomp.h";
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int		SQLErrCheck			();
+
+
+
+/*---------------------------------------------------------------*/
+/*    User Work 변수                                             */
+/*---------------------------------------------------------------*/
+#define TRUE 1
+#define FALSE 0
+
+int 	ConnectDB_Old	(
+					)
+{
+EXEC SQL BEGIN DECLARE SECTION;
+	char	gConnStr               [256];
+EXEC SQL END DECLARE SECTION;
+char	szDBCONN	                [50];
+
+
+    memset(gConnStr, 0x00, sizeof(gConnStr));
+    memset(szDBCONN, 0x00, sizeof(szDBCONN));
+    sprintf(szDBCONN, "%s", getenv("DBCONN"));
+
+	sprintf(gConnStr, "%s/%s@%s", (char *)getenv("DBUSER"),(char *)getenv("DBPASS"),(char *)getenv("DBCONN"));
+
+	EXEC SQL CONNECT :gConnStr;
+	if (sqlca.sqlcode != 0) {
+		if (strlen(gszLogFile) == 0) {
+			printf("ECAMS        ConnectDB() ERROR [%d] \n", sqlca.sqlcode);
+		} else {	
+		    /*LOG*/sprintf(gszLogMsg,"ECAMS        ConnectDB() ERROR [%d] \n", sqlca.sqlcode);
+		    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		}
+	    return FALSE;
+	}
+
+	return TRUE;
+}
+
+/*---------------------------------------------------------------*/
+/*	Function  : ConnectDB                                        */
+/*	Action    : eCAMS  DATABASE  CONNECT                         */
+/*	Parameter : NONE                                             */
+/*	Return    : 정상 : TRUE, 오류 : FALSE                        */
+/*---------------------------------------------------------------*/
+int 	ConnectDB	(
+					)
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		char	gConnStr               [256];
+	EXEC SQL END DECLARE SECTION;
+
+    int		rtycnt;
+	int		conflag;
+	char    confFile       [256];
+	char	gCommand	   [256];           /* 시스템명령 WORK       */
+	int		retval               ;          /* 쿼리결과              */
+	char	*dummy               ;          /* Read Buffer           */
+	FILE    * SrcPtr;
+	long	nFileSize            ;
+	char temppath [50];
+	
+	    strcpy(confFile,"ecams.conf");
+		memset(gConnStr, 0x00, sizeof(gConnStr));
+		strcpy (temppath, "./tmp/clntmp");		
+		strcat (temppath, "XXXXXXXXXX");
+		mkstemp (temppath);
+		
+		sprintf(gCommand, "chmod 775 %s",temppath);
+		retval = system (gCommand) / 256;
+		if (retval != 0) {		
+			fprintf(stderr,"chmod  774 ERROR [%s][%d]\n", gCommand,retval);
+			return FALSE;
+		}
+		
+		
+		sprintf(gCommand, "java eCAMSConf D %s \"%s\"",confFile,temppath);
+		retval = system (gCommand) / 256;
+		if (retval != 0) {		
+			fprintf(stderr,"DB Connection Decryption CALL ERROR [%s][%d]\n", gCommand,retval);
+			return FALSE;
+		}
+		if (access(temppath, F_OK) < 0) {		
+			fprintf(stderr,"DB Connection Decryption CALL ERROR temppath [%s][%s]\n", gCommand,temppath);
+			return FALSE;
+		}
+		if ((SrcPtr = fopen(temppath, "r")) == (FILE *) NULL) {
+			fprintf(stderr,"DB Connection Decryption Result File Open Error [%s]\n", temppath);
+			return FALSE;
+		}
+		
+		/*nFileSize = FileSizeInf(temppath) + 1;*/
+		nFileSize = 128;
+		dummy = (char *)malloc(nFileSize);
+		memset(dummy, 0x00, nFileSize);
+		
+		while (fgets(dummy, nFileSize, SrcPtr) != (char *) NULL) {
+			sprintf(dummy,"%s", rep_char(dummy,"\n",""));
+			sprintf(dummy,"%s", rep_char(dummy,"\r\n",""));
+			sprintf(dummy,"%s", trunc_char(dummy));
+			
+			if (strlen(dummy) < 2) {
+				fprintf(stderr,"DB Connection Decryption Result File Error [%s]\n", temppath);
+				free(dummy);
+				fclose (SrcPtr);
+				unlink(temppath);
+				return (3);
+			}
+			if (cmp_left_char(dummy,2,"OK") != 0) {
+				fprintf(stderr,"DB Connection Decryption Result Error [%s][%s]\n", temppath,dummy);
+				free(dummy);
+				fclose (SrcPtr);
+				unlink(temppath);
+				return (3);
+			}	
+			sprintf(gConnStr,"%s",mid_char(dummy,3,strlen(dummy) - 2));
+			break;
+			
+		}
+		free(dummy);
+		fclose (SrcPtr);
+		unlink(temppath);
+		rtycnt = 0;
+		conflag = 0;
+                do
+		{
+			EXEC SQL CONNECT :gConnStr;
+			if (sqlca.sqlcode != 0) {
+				fprintf(stderr,"ecams ConnectDB() ERROR [%s][%d][%s]", sqlca.sqlerrm.sqlerrmc,sqlca.sqlcode,gConnStr);
+				conflag = 0;
+				rtycnt++;
+			}			
+			else
+			{
+				conflag = 1;
+				break;
+			}
+			sleep(2);
+		} while(rtycnt < 10);
+		
+		if (conflag==0){
+			return FALSE;
+		}
+		else{
+			return TRUE;
+		}
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : SQLErrCheck                                      */
+/*	Action    : Oracle Error Check                               */
+/*	Parameter : sqlcode                                          */
+/*	Return    : sqlcode                                          */
+/*---------------------------------------------------------------*/
+int		SQLErrCheck	( int  sqlcode
+					)
+{
+	if (sqlcode != 0) {
+		/*LOG*/sprintf(gszLogMsg,"SQLErrCheck(<%d>) SQLCA.SQLERRM[%s]\n",sqlcode,sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	}
+
+	return sqlcode;
+}
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : SetTempDir                                       */
+/*	Action    : code에 해당하는 디렉토리 경로 얻어 오기          */
+/*	            - 매개변수 code를 cmm0012에서 조회 후            */
+/*	              그 값을 매개변수 RstPath에 복사한다.           */
+/*	            - 만약 조회된 디렉토리 경로에 디렉토리가 존재    */
+/*	              하지 않는 다면 디렉토리 생성 후 종료           */
+/*	Parameter : sqlcode                                          */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	SetTempDir	( char *code
+					, char *RstPath
+					)
+{
+char 	RstDir                   [dfDir];
+char 	szSysdate                    [9];
+
+	EXEC SQL
+		SELECT  CM_PATH
+		  INTO  :RstDir
+		  FROM  CMM0012
+		 WHERE  CM_STNO   = 'ECAMS'
+		   AND  CM_PATHCD = :code;
+	 if (sqlca.sqlcode != 0) {
+			/*LOG*/sprintf(gszLogMsg,"SetTempDir Directory Code Nothing [%s](<%d>) SQLCA.SQLERRM[%s]\n",code,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	 }
+	NotUseDataTruncate (RstDir   , 0x20);
+
+	if (access(RstDir,F_OK) != 0) {
+		/*LOG*/sprintf(gszLogMsg,"SetTempDir 1 [%s] \n",RstDir);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		Local_Dir_Make(RstDir);
+	}
+	if (cmp_right_char(RstDir, 1, "/") != 0)
+		sprintf(RstPath,"%s/", RstDir);
+	else
+		sprintf(RstPath,"%s", RstDir);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : File_Merge                                       */
+/*	Action    : 처리결과 FILE Merge (ADD) 처리                   */
+/*	            - 기존처리결과파일에 작업처리내용파일을 추가한다 */
+/*	           	1 -  OLD_File에 NEW_File의 내용과                */
+/*	           		>>> SERVER [ServerIP]                        */
+/*	                  작업처리내용 : [MergeMsg] 내용이 추가 됨   */
+/*	            2 -  OLD_File에 NEW_File의 내용을 추가           */
+/*	            3 -  OLD_File에 MergeMsg의 내용 추가             */
+/*	Parameter : sqlcode                                          */
+/*	Return    : 0 - 작업실패, 1 - 성공                           */
+/*---------------------------------------------------------------*/
+int 	File_Merge	( char *OLD_File
+					, char *NEW_File
+					, char *ServerIP
+					, char *MergeMsg
+					, int   flag
+					)
+{
+FILE	*OLDPtr                         ; /* OLD File Pointer    */
+FILE	*NEWPtr                         ; /* NEW File Pointer    */
+int 	LineCnt                         ; /* OLD File Line Count */
+char    indat                     [1024]; /* Read Buffer         */
+char	szSysDate	               [8+1];
+char	szNSysDate	              [10+1];
+char 	szSysTime                   [16];
+
+    LineCnt = 0;
+	
+	Get_Sys_Date(szSysDate);
+	Conver_Date (szSysDate, szNSysDate);
+
+	Get_Sys_Time20(szSysTime);
+	
+    if (flag !=3){
+    	if ((NEWPtr = fopen(NEW_File,"r")) == (FILE *) NULL) {
+	        return (0);
+		}
+	}
+
+	if ((OLDPtr = fopen(OLD_File,"a+")) == (FILE *) NULL) {
+			return (0);
+	}
+
+	if (strlen(MergeMsg) > 0 && flag == 1) {
+		fprintf(OLDPtr, ">>> SERVER [%s] 작업처리내용 : [%s] [%s %s]\n\n", ServerIP, MergeMsg, szNSysDate,szSysTime);
+	}
+	else if (strlen(MergeMsg) > 0 && flag == 3) {
+		fprintf(OLDPtr, "%s\n", MergeMsg);
+	}
+
+	if (flag !=3) {
+		while (fgets(indat, 1024, NEWPtr) != (char *) NULL) {
+			sprintf(indat, "%s", rep_char(indat, "\r\n", ""));
+			sprintf(indat, "%s", rep_char(indat, "\n"  , ""));
+			LineCnt++;
+			fprintf(OLDPtr, "%s\n", indat);
+		}
+		if (LineCnt > 0) {
+			fprintf(OLDPtr, "\n\n\n");
+		}
+		fclose (NEWPtr);
+	}
+	fclose (OLDPtr);
+	remove(NEW_File);
+	return (1);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : ChangeVolPath                                    */
+/*	Action    : 서버별 적용 디렉토리 변환                        */
+/*	Parameter : szSysCd        : 시스템코드                      */
+/*              szSvrCd        : 서버구분                        */
+/*              szRsrcCD       : 프로그램종류                    */
+/*              szSeqNo        : 서버일련번호                    */
+/*              szDirPath      : 디렉토리                        */
+/*              szChangDirPath : 변환디렉토리                    */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+int 	ChangeVolPath	( char *szSysCd
+						, char *szSvrCd
+						, char *szRsrcCD
+						, char *szJobCD
+						, int   szSeqNo
+						, char *szDirPath
+						, char *szChangDirPath
+						)
+{
+char	SV_DevHome	             [dfDir];
+char	SV_ProdHome	             [dfDir];
+char	szChangDirPath1	         [dfDir];
+char	szBaseSvr                  [2+1];
+char    szCVSPrjM                [dfDir];
+char    szCVSPrjS                [dfDir];
+char    szCVSPrj                 [dfDir];
+int     nCnt = 0;
+
+	memset(szBaseSvr, 0x00, sizeof(szBaseSvr));
+	
+	EXEC SQL
+		SELECT  CM_DIRBASE
+		  INTO  :szBaseSvr
+		  FROM  CMM0030
+		 WHERE  CM_SYSCD = :szSysCd;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: 기준 SVR GET ERR [%s] 01 [%d] [%s]", szSysCd, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return sqlca.sqlcode;
+	}
+	NotUseDataTruncate (szBaseSvr, 0x20);
+
+	memset(szChangDirPath, 0x00, sizeof(szChangDirPath));		
+	
+    EXEC SQL
+		SELECT  A.CM_VOLPATH
+		  INTO	:SV_DevHome
+		  FROM	CMM0038 A
+		      , CMM0031 B
+		 WHERE	A.CM_SysCD  = :szSysCd
+		   AND  A.CM_SvrCD  = :szBaseSvr
+		   AND  A.CM_RsrcCD = :szRsrcCD
+		   AND  A.CM_SYSCD	= B.CM_SYSCD
+		   AND  A.CM_SVRCD  = B.CM_SVRCD
+		   AND  A.CM_SEQNO	= B.CM_SEQNO
+		   AND  B.CM_CLOSEDT IS NULL
+		   AND  NVL(B.CM_CMPSVR,'N') = 'Y'
+		   AND  ROWNUM=1;
+    if (sqlca.sqlcode == 1403) {
+		EXEC SQL
+			SELECT  A.CM_VOLPATH
+			  INTO	:SV_DevHome
+			  FROM	CMM0038 A
+			      , CMM0031 B
+			 WHERE	A.CM_SysCD  = :szSysCd
+			   AND  A.CM_SvrCD  = :szBaseSvr
+			   AND  A.CM_RsrcCD = :szRsrcCD
+			   AND  A.CM_SYSCD	= B.CM_SYSCD
+			   AND  A.CM_SVRCD  = B.CM_SVRCD
+			   AND  A.CM_SEQNO	= B.CM_SEQNO
+			   AND  B.CM_CLOSEDT IS NULL
+			   AND  ROWNUM=1;   
+	}			   
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: Directory Base Server 정보 오류 syscd[%s]rsrccd[%s]svrcd[%s] 01 [%d] [%s]", szSysCd,szRsrcCD,szBaseSvr, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return sqlca.sqlcode;
+	}	   
+	sprintf(SV_DevHome, "%s", trunc_char(SV_DevHome));
+	
+	if (Char_Check(SV_DevHome,"?#")>=0) {
+		if (Char_Check(SV_DevHome,"?#CVSPRJ#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ),LOWER(B.CM_BASEDIR)
+			     INTO :szCVSPrjM, :szCVSPrjS
+			     FROM CMM0034 A,CMM0036 B
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD
+			      AND B.CM_SYSCD=:szSysCd
+			      AND B.CM_RSRCCD=:szRsrcCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath : CVS PrjInfo GET ERR [%s][%s][%s] [%d][%s]", 
+				      szSysCd,szRsrcCD,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			NotUseDataTruncate (szCVSPrjS, 0x20);
+			 
+			if (strlen(szCVSPrjS) == 0 || strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath : CVS PrjInfo Not Exists [%s][%s][%s] ", 
+				      szSysCd,szRsrcCD,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			 
+			sprintf(szCVSPrj,"%s/%s%s",szCVSPrjM,szCVSPrjM,szCVSPrjS);
+			sprintf(SV_DevHome,"%s",rep_char(SV_DevHome,"?#CVSPRJ#",szCVSPrj));
+		} else if (Char_Check(SV_DevHome,"?#JOBETC#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ)
+			     INTO :szCVSPrjM
+			     FROM CMM0034 A
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath : JOB ETCNAME GET ERR [%s][%s] [%d][%s]", 
+				      szSysCd,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			 
+			if (strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath : JOB ETCNAME Not Exists [%s][%s] ",szSysCd,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			 
+			sprintf(SV_DevHome,"%s",rep_char(SV_DevHome,"?#JOBETC#",szCVSPrjM));
+		} else {
+			sprintf(gszLogMsg, "ChangeVolPath : Change Mapping Rule Not Exists [%s][%s][%s][%s] ", 
+			      szSysCd,szRsrcCD,szJobCD,SV_DevHome);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return 2;		
+		}
+	}
+	if (strcmp(szBaseSvr,szSvrCd) == 0) {
+		strcpy(szChangDirPath,szDirPath);
+		return 0;
+	}
+	EXEC SQL
+		SELECT  CM_VOLPATH
+		  INTO	:SV_ProdHome
+		  FROM	CMM0038
+		 WHERE	CM_SysCD  = :szSysCd
+		   AND  CM_SEQNO  = :szSeqNo
+		   AND  CM_SvrCD  = :szSvrCd
+		   AND  CM_RsrcCD = :szRsrcCD;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 2: REAL Server 정보 오류 syscd[%s]rsrccd[%s]svrcd[%s]szSeqNo[%d] [%d] [%s]", szSysCd,szRsrcCD,szSvrCd,szSeqNo,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return sqlca.sqlcode;
+	}
+	sprintf(SV_ProdHome, "%s", trunc_char(SV_ProdHome));
+	if (Char_Check(SV_ProdHome,"?#") >= 0) {
+		if (Char_Check(SV_ProdHome,"?#JOBETC#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ)
+			     INTO :szCVSPrjM
+			     FROM CMM0034 A
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath : JOB ETCNAME GET ERR [%s][%s] [%d][%s]", 
+				      szSysCd,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			 
+			if (strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath : JOB ETCNAME Not Exists [%s][%s] ", szSysCd,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			 
+			sprintf(SV_DevHome,"%s",rep_char(SV_ProdHome,"?#JOBETC#",szCVSPrjM));
+		} else if (Char_Check(SV_ProdHome,"?#CVSPRJ#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ),LOWER(B.CM_BASEDIR)
+			     INTO :szCVSPrjM, :szCVSPrjS
+			     FROM CMM0034 A,CMM0036 B
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD
+			      AND B.CM_SYSCD=:szSysCd
+			      AND B.CM_RSRCCD=:szRsrcCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath : CVS PrjInfo GET ERR [%s][%s][%s] [%d][%s]", 
+				      szSysCd,szRsrcCD,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			NotUseDataTruncate (szCVSPrjS, 0x20);
+			 
+			if (strlen(szCVSPrjS) == 0 || strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath : CVS PrjInfo Not Exists [%s][%s][%s] ", 
+				      szSysCd,szRsrcCD,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			 
+			sprintf(szCVSPrj,"%s/%s%s",szCVSPrjM,szCVSPrjM,szCVSPrjS);
+			sprintf(SV_ProdHome,"%s",rep_char(SV_ProdHome,"?#CVSPRJ#",szCVSPrj));
+		} else {
+			sprintf(gszLogMsg, "ChangeVolPath : Change Mapping Rule Not Exists [%s][%s][%s][%s] ", 
+			      szSysCd,szRsrcCD,szJobCD,SV_ProdHome);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return 2;		
+		}
+    }
+	sprintf(SV_ProdHome, "%s", trunc_char(SV_ProdHome));
+	sprintf(szDirPath  , "%s", rep_char(szDirPath  , "//", "/"));
+	sprintf(SV_ProdHome, "%s", rep_char(SV_ProdHome, "//", "/"));
+	sprintf(SV_DevHome , "%s", rep_char(SV_DevHome , "//", "/"));
+ 	
+ 	  
+
+	if (cmp_left_char(szDirPath, strlen(SV_DevHome), SV_DevHome) == 0) {		
+		sprintf(szChangDirPath1, "%s/%s", SV_ProdHome, right_char(szDirPath, strlen(szDirPath) - strlen(SV_DevHome)));
+		sprintf(szChangDirPath, "%s", rep_char(szChangDirPath1, "//", "/"));
+	}
+	else {
+		sprintf(szChangDirPath, "%s", szDirPath);
+	}
+	return 0;
+}
+
+/*---------------------------------------------------------------*/
+/*	Function  : ChangeVolPath_acpt                               */
+/*	Action    : 서버별 적용 디렉토리 변환                                 */
+/*	Parameter : szSysCd        : 신청번호                           */
+/*	            nSerNo         : 일련번호                           */
+/*	            szPrcSys       : 처리단계                           */
+/*	            szSysCd        : 시스템코드                          */
+/*              szSvrCd        : 서버구분                           */
+/*              szSeqNo        : 서버일련번호                         */
+/*              szChangDirPath : 변환디렉토리                         */
+/*	Return    : 0(OK)                                            */
+/*---------------------------------------------------------------*/
+int	ChangeVolPath_acpt	( char *szAcptNo
+                        , int   nSerNo
+                        , char *szPrcSys
+                        , char *szSysCd
+						, char *szSvrCd
+						, int   nSvrSeq
+						, char *szChangDirPath
+						)
+{
+char	SV_DevHome	             [dfDir];
+char	SV_ProdHome	             [dfDir];
+char    szAgentDir               [dfDir];
+char	szChangDirPath1	         [dfDir];
+char	szBaseSvr                  [2+1];
+char    szItemID              [dfItemID];
+char    szRsrcCD              [dfRsrcCD];
+char    szJobCD                [dfJobCD];
+char    szDirPath                [dfDir];
+char    szBaseOS               [dfSysOS];
+char    szSysOS                [dfSysOS];
+char    szInfo                  [dfInfo];
+char    szQryCD                [dfReqCD];
+char    szCVSHome                [dfDir];
+char    szCVSPrjM                [dfDir];
+char    szCVSPrjS                [dfDir];
+char    szCVSPrj                 [dfDir];
+int     nCnt = 0;                      
+
+	memset(szBaseSvr, 0x00, sizeof(szBaseSvr));
+	memset(szCVSHome, 0x00, sizeof(szCVSHome));
+	memset(szCVSPrjM, 0x00, sizeof(szCVSPrjM));
+	memset(szCVSPrjS, 0x00, sizeof(szCVSPrjS));
+	sprintf(szQryCD,"%s",mid_char(szAcptNo,5,2));
+	
+	EXEC SQL
+		SELECT  C.CM_SVRCD,B.CR_RSRCCD,B.CR_JOBCD,B.CR_ITEMID,F.CM_INFO,C.CM_SYSOS,E.CM_DIRPATH,D.CM_VOLPATH
+		  INTO  :szBaseSvr,:szRsrcCD,:szJobCD,:szItemID,:szInfo,:szBaseOS,:szDirPath,:SV_DevHome
+		  FROM  CMM0030 A,CMR1010 B,CMM0031 C,CMM0038 D,CMM0070 E,CMM0036 F
+		 WHERE  B.CR_ACPTNO=:szAcptNo
+		   AND  B.CR_SERNO=:nSerNo
+		   	AND B.CR_SYSCD=A.CM_SYSCD
+		   	AND A.CM_SYSCD=C.CM_SYSCD
+		   	AND NVL(A.CM_DIRBASE,'01')=C.CM_SVRCD
+		   	AND C.CM_CLOSEDT IS NULL
+		   	AND C.CM_SYSCD=D.CM_SYSCD
+		   	AND C.CM_SVRCD=D.CM_SVRCD
+		   	AND C.CM_SEQNO=D.CM_SEQNO
+		   	AND B.CR_RSRCCD=D.CM_RSRCCD
+		   	AND B.CR_SYSCD=F.CM_SYSCD
+		   	AND B.CR_RSRCCD=F.CM_RSRCCD
+		   	AND B.CR_SYSCD=E.CM_SYSCD
+		   	AND B.CR_DSNCD=E.CM_DSNCD
+		   	AND  DECODE(SUBSTR(A.CM_SYSINFO,9,1),'1',SVRJOBCHK(C.CM_SYSCD,C.CM_SVRCD,C.CM_SEQNO,B.CR_JOBCD),0)=0;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "ChangeVolPath_acpt : BaseInfo GET ERR [%s][%d] [%d][%s]", 
+		      szAcptNo, nSerNo,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return sqlca.sqlcode;
+	}
+	NotUseDataTruncate (szBaseSvr, 0x20);
+	NotUseDataTruncate (szRsrcCD , 0x20);
+	NotUseDataTruncate (szJobCD  , 0x20);
+	NotUseDataTruncate (szItemID , 0x20);
+	NotUseDataTruncate (szInfo   , 0x20);
+	NotUseDataTruncate (szBaseOS , 0x20);
+	sprintf(szDirPath , "%s", trunc_char(szDirPath ));
+	sprintf(SV_DevHome, "%s", trunc_char(SV_DevHome));
+
+	memset(szChangDirPath, 0x00, sizeof(szChangDirPath));
+	
+	if (Char_Check(SV_DevHome,"?#")>=0) {
+		if (Char_Check(SV_DevHome,"?#CVSPRJ#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ),LOWER(B.CM_BASEDIR)
+			     INTO :szCVSPrjM, :szCVSPrjS
+			     FROM CMM0034 A,CMM0036 B
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD
+			      AND B.CM_SYSCD=:szSysCd
+			      AND B.CM_RSRCCD=:szRsrcCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : CVS PrjInfo GET ERR [%s][%d][%s][%s][%s] [%d][%s]", 
+				      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			NotUseDataTruncate (szCVSPrjS, 0x20);
+			 
+			if (strlen(szCVSPrjS) == 0 || strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : CVS PrjInfo Not Exists [%s][%d][%s][%s][%s] ", 
+				      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			sprintf(szCVSPrj,"%s/%s%s",szCVSPrjM,szCVSPrjM,szCVSPrjS);
+			sprintf(SV_DevHome,"%s",rep_char(SV_DevHome,"?#CVSPRJ#",szCVSPrj));
+		} else if (Char_Check(SV_DevHome,"?#JOBETC#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ)
+			     INTO :szCVSPrjM
+			     FROM CMM0034 A
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : JOB ETCNAME GET ERR [%s][%d][%s][%s] [%d][%s]", 
+				      szAcptNo,nSerNo,szSysCd,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			 
+			if (strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : JOB ETCNAME Not Exists [%s][%d][%s][%s] ", 
+				      szAcptNo,nSerNo,szSysCd,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			 
+			sprintf(SV_DevHome,"%s",rep_char(SV_DevHome,"?#JOBETC#",szCVSPrjM));
+		} else {
+			sprintf(gszLogMsg, "ChangeVolPath_acpt : Change Mapping Rule Not Exists [%s][%d][%s][%s][%s][%s] ", 
+			      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD,SV_DevHome);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return 2;		
+		}		
+	
+		if (Char_Check(SV_DevHome,"?#")>=0) {
+			sprintf(gszLogMsg, "ChangeVolPath_acpt : Change Mapping Rule Not Changes [%s][%d][%s][%s][%s][%s] ", 
+			      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD,SV_DevHome);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return 2;		
+		}
+	}
+	sprintf(szDirPath  , "%s", rep_char(szDirPath  , "\\", "/"));
+	sprintf(szDirPath  , "%s", rep_char(szDirPath  , "//", "/"));
+	sprintf(SV_DevHome , "%s", rep_char(SV_DevHome , "\\", "/"));
+	sprintf(SV_DevHome , "%s", rep_char(SV_DevHome , "//", "/"));
+	
+	if (strlen(szDirPath) < strlen(SV_DevHome)) {
+		sprintf(gszLogMsg, "ChangeVolPath_acpt : BaseInfo HomePath Not Match [%s][%d] [DirPath=%s][BaseHome=%s]", 
+		      szAcptNo, nSerNo,szDirPath,SV_DevHome);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return 2;	
+	}
+	
+	if (cmp_left_char(szDirPath,strlen(SV_DevHome),SV_DevHome) != 0) {
+		sprintf(gszLogMsg, "ChangeVolPath_acpt : BaseInfo HomePath Not Match 2 [%s][%d] [DirPath=%s][BaseHome=%s]", 
+		      szAcptNo, nSerNo,szDirPath,SV_DevHome);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return 2;	
+	}
+		
+	if ((strcmp(szPrcSys,"SYSDN") == 0 || strcmp(szPrcSys,"SYSDNC") == 0) && cmp_mid_char(szInfo,38,1,"1") == 0) {
+		EXEC SQL
+		   SELECT A.CM_CVSPRJ,B.CM_BASEDIR,C.CM_PATH
+		     INTO :szCVSPrjM,:szCVSPrjS,:szCVSHome
+		     FROM CMM0034 A,CMM0036 B,CMM0012 C
+		    WHERE B.CM_SYSCD=:szSysCd
+		      AND B.CM_RSRCCD=:szRsrcCD
+		      AND B.CM_SYSCD=A.CM_SYSCD
+		      AND A.CM_JOBCD=:szJobCD
+		      AND C.CM_STNO='ECAMS'
+		      AND C.CM_PATHCD='CV';
+		if (sqlca.sqlcode != 0) {
+			sprintf(gszLogMsg, "ChangeVolPath_acpt : CVS Info GET ERR [%s][%d][%s][%s][%s] [%d][%s]", 
+			      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return sqlca.sqlcode;
+		} 
+		NotUseDataTruncate (szCVSPrjM, 0x20);
+		NotUseDataTruncate (szCVSPrjS, 0x20);
+		NotUseDataTruncate (szCVSHome, 0x20);
+		sprintf(szChangDirPath,"%s/%s%s/%s",szCVSHome,szCVSPrjM,szCVSPrjS,right_char(szDirPath, strlen(szDirPath) - strlen(SV_DevHome)));
+		return 0;
+	} else { 	
+		if (strcmp(szBaseSvr,szSvrCd) == 0) {
+			strcpy(szChangDirPath,szDirPath);
+			return 0;
+		}
+	}	
+	
+	EXEC SQL
+		SELECT  A.CM_SYSOS,B.CM_VOLPATH,A.CM_DIR
+		  INTO	:szSysOS,:SV_ProdHome, :szAgentDir
+		  FROM	CMM0031 A,CMM0038 B
+		 WHERE	A.CM_SYSCD = :szSysCd
+		   AND  A.CM_SVRCD = :szSvrCd
+		   AND  A.CM_SEQNO = :nSvrSeq
+		   AND  A.CM_SYSCD = B.CM_SYSCD
+		   AND  A.CM_SVRCD = B.CM_SVRCD
+		   AND  A.CM_SEQNO = B.CM_SEQNO
+		   AND  B.CM_RSRCCD= :szRsrcCD;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "ChangeVolPath_acpt: Target Server Info Fail [%s] syscd[%s]rsrccd[%s]svrcd[%s]svrseq[%d] [%d] [%s]", 
+		      szAcptNo,szSysCd,szRsrcCD,szSvrCd,nSvrSeq,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return sqlca.sqlcode;
+	}
+	
+	NotUseDataTruncate (szSysOS , 0x20);
+	sprintf(SV_ProdHome, "%s", trunc_char(SV_ProdHome));
+	sprintf(szAgentDir , "%s", trunc_char(szAgentDir));
+		
+	if (Char_Check(SV_ProdHome,"?#") >= 0) {
+		if (Char_Check(SV_ProdHome,"?#JOBETC#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ)
+			     INTO :szCVSPrjM
+			     FROM CMM0034 A
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : JOB ETCNAME GET ERR [%s][%d][%s][%s] [%d][%s]", 
+				      szAcptNo,nSerNo,szSysCd,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			 
+			if (strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : JOB ETCNAME Not Exists [%s][%d][%s][%s] ", 
+				      szAcptNo,nSerNo,szSysCd,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			 
+			sprintf(SV_ProdHome,"%s",rep_char(SV_ProdHome,"?#JOBETC#",szCVSPrjM));
+		} else if (Char_Check(SV_ProdHome,"?#CVSPRJ#")>=0) {
+			EXEC SQL
+			   SELECT LOWER(A.CM_CVSPRJ),LOWER(B.CM_BASEDIR)
+			     INTO :szCVSPrjM, :szCVSPrjS
+			     FROM CMM0034 A,CMM0036 B
+			    WHERE A.CM_SYSCD=:szSysCd
+			      AND A.CM_JOBCD=:szJobCD
+			      AND B.CM_SYSCD=:szSysCd
+			      AND B.CM_RSRCCD=:szRsrcCD;
+			if (sqlca.sqlcode != 0) {
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : CVS PrjInfo GET ERR [%s][%d][%s][%s][%s] [%d][%s]", 
+				      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return sqlca.sqlcode;			 	
+			}
+			NotUseDataTruncate (szCVSPrjM, 0x20);
+			NotUseDataTruncate (szCVSPrjS, 0x20);
+			 
+			if (strlen(szCVSPrjS) == 0 || strlen(szCVSPrjM) == 0) {				
+				sprintf(gszLogMsg, "ChangeVolPath_acpt : CVS PrjInfo Not Exists [%s][%d][%s][%s][%s] ", 
+				      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				return 2;		 	
+			}
+			sprintf(szCVSPrj,"%s/%s%s",szCVSPrjM,szCVSPrjM,szCVSPrjS);
+			sprintf(SV_ProdHome,"%s",rep_char(SV_ProdHome,"?#CVSPRJ#",szCVSPrj));
+		} else {
+			sprintf(gszLogMsg, "ChangeVolPath_acpt : Change Mapping Rule Not Exists [%s][%d][%s][%s][%s][%s] ", 
+			      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD,SV_ProdHome);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return 2;		
+		}
+		if (Char_Check(SV_ProdHome,"?#")>=0) {
+			sprintf(gszLogMsg, "ChangeVolPath_acpt : Change Mapping Rule Not Changes [%s][%d][%s][%s][%s][%s] ", 
+			      szAcptNo,nSerNo,szSysCd,szRsrcCD,szJobCD,SV_ProdHome);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			return 2;		
+		}
+    }    
+    
+	sprintf(SV_ProdHome, "%s", rep_char(SV_ProdHome, "\\", "/"));
+	sprintf(SV_ProdHome, "%s", rep_char(SV_ProdHome, "//", "/"));
+   	
+	if ((strcmp(szPrcSys,"SYSCB") == 0 || strcmp(szPrcSys,"SYSGB") == 0 || strcmp(szPrcSys,"SYSDL") == 0) &&
+		cmp_mid_char(szInfo,19,1,"1") == 0 && strcmp(szSvrCd,"01") != 0) { /*임시영역컴파일인 경우 */
+		sprintf(szChangDirPath,"%s/%s/%s",SV_ProdHome,szAcptNo,right_char(szDirPath, strlen(szDirPath) - strlen(SV_DevHome)));
+	} else if (strcmp(szPrcSys,"SYSED") == 0 && 
+		(strcmp(szQryCD,"07") == 0 && cmp_mid_char(szInfo,55,1,"1") == 0) ||
+		(strcmp(szQryCD,"03") == 0 && cmp_mid_char(szInfo,66,1,"1") == 0) ||
+		(strcmp(szQryCD,"04") == 0 && cmp_mid_char(szInfo,37,1,"1") == 0) ||
+		(strcmp(szQryCD,"16") == 0 && cmp_mid_char(szInfo,37,1,"1") == 0) ||
+		(strcmp(szQryCD,"06") == 0 && cmp_mid_char(szInfo,37,1,"1") == 0)) {		
+		/*-------------------------------------------------------*/
+		/*	릴리즈시 홈디렉토리 배포인경우 처리                              */
+		/*-------------------------------------------------------*/
+		sprintf(szChangDirPath, "%s", SV_ProdHome);
+	} else {	
+		if (cmp_left_char(szDirPath, strlen(SV_DevHome), SV_DevHome) == 0) {		
+			sprintf(szChangDirPath1, "%s/%s", SV_ProdHome, right_char(szDirPath, strlen(szDirPath) - strlen(SV_DevHome)));
+			sprintf(szChangDirPath, "%s", rep_char(szChangDirPath1, "//", "/"));
+		}
+		else {
+			sprintf(szChangDirPath, "%s", szDirPath);
+		}
+	}
+	if (cmp_right_char(szChangDirPath, 1, "/") == 0) {
+		sprintf(szChangDirPath1, "%s", left_char(szChangDirPath, strlen(szChangDirPath) - 1));
+	} else {
+		strcpy(szChangDirPath1,szChangDirPath);
+	}
+	if (strcmp(szPrcSys,"SYSED") == 0 && 
+		(strcmp(szQryCD,"07") == 0 && cmp_mid_char(szInfo,52,1,"1") == 0) ||
+		(strcmp(szQryCD,"03") == 0 && cmp_mid_char(szInfo,65,1,"1") == 0) ||
+		(strcmp(szQryCD,"04") == 0 && cmp_mid_char(szInfo,23,1,"1") == 0) ||
+		(strcmp(szQryCD,"16") == 0 && cmp_mid_char(szInfo,23,1,"1") == 0) ||
+		(strcmp(szQryCD,"06") == 0 && cmp_mid_char(szInfo,23,1,"1") == 0)) {		
+		/*-------------------------------------------------------*/
+		/*	릴리즈시 temp 저장인 경우 처리                               */
+		/*-------------------------------------------------------*/
+		sprintf(szChangDirPath, "%s/tmp", szChangDirPath1);
+		strcpy(szChangDirPath1,szChangDirPath);
+	}
+	/*-------------------------------------------------------*/
+	/*	서버 OS별 디렉토리 변환                                     */
+	/*-------------------------------------------------------*/
+	Convert_WinDirPath (szSysOS, szChangDirPath1, szChangDirPath);
+	
+	return 0;
+}
+/*---------------------------------------------------------------*/
+/*	Function  : Mr_ChangeVolPath                                 */
+/*	Action    : 미래로 시스템에 한하여 적용 디렉토리 변환        */
+/*	Parameter : szSysCd        : 시스템코드                      */
+/*              szSvrCd        : 서버구분                        */
+/*              szRsrcCD       : 프로그램종류                    */
+/*              szSeqNo        : 서버일련번호                    */
+/*              szDirPath      : 디렉토리                        */
+/*              szChangDirPath : 변환디렉토리                    */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	Mr_ChangeVolPath	( char *szSysCd
+						    , char *szSvrCd
+					     	, char *szRsrcCD
+							, int   szSeqNo
+							, char *szDirPath
+							, char *szChangDirPath
+							)
+{
+char	SV_DevHome	             [dfDir];
+char	SV_ProdHome	             [dfDir];
+char	szChangDirPath1	         [dfDir];
+char	szBaseSvr                  [2+1];
+int     nCnt  = 0;
+int	 	zzRet = 0;
+char    SV_DirPath               [dfDir];
+
+	memset(szBaseSvr, 0x00, sizeof(szBaseSvr));
+	
+	EXEC SQL
+		SELECT  CM_DIRBASE
+		  INTO  :szBaseSvr
+		  FROM  CMM0030
+		 WHERE  CM_SYSCD = :szSysCd;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: 기준 SVR GET ERR [%s] 01 [%d] [%s]", szSysCd, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return;
+	}
+	NotUseDataTruncate (szBaseSvr, 0x20);
+
+	memset(szChangDirPath, 0x00, sizeof(szChangDirPath));
+
+	strcpy(SV_DirPath,szDirPath);	
+			
+	if (strcmp(szBaseSvr,szSvrCd) == 0) {
+		strcpy(szChangDirPath,szDirPath);
+		return;
+	}
+	
+    EXEC SQL
+		SELECT  A.CM_VOLPATH
+		  INTO	:SV_DevHome
+		  FROM	CMM0038 A
+		      , CMM0031 B
+		 WHERE	A.CM_SysCD  = :szSysCd
+		   AND  A.CM_SvrCD  = :szBaseSvr
+		   AND  A.CM_RsrcCD = :szRsrcCD
+		   AND  A.CM_SYSCD	= B.CM_SYSCD
+		   AND  A.CM_SVRCD  = B.CM_SVRCD
+		   AND  A.CM_SEQNO	= B.CM_SEQNO
+		   AND  B.CM_CLOSEDT IS NULL
+		   AND  NVL(B.CM_CMPSVR,'N') = 'Y'
+		   AND  ROWNUM=1;
+    if (sqlca.sqlcode == 1403) {
+		EXEC SQL
+			SELECT  A.CM_VOLPATH
+			  INTO	:SV_DevHome
+			  FROM	CMM0038 A
+			      , CMM0031 B
+			 WHERE	A.CM_SysCD  = :szSysCd
+			   AND  A.CM_SvrCD  = :szBaseSvr
+			   AND  A.CM_RsrcCD = :szRsrcCD
+			   AND  A.CM_SYSCD	= B.CM_SYSCD
+			   AND  A.CM_SVRCD  = B.CM_SVRCD
+			   AND  A.CM_SEQNO	= B.CM_SEQNO
+			   AND  B.CM_CLOSEDT IS NULL
+			   AND  ROWNUM=1;   
+	}			   
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: Directory Base Server 정보 오류 syscd[%s]rsrccd[%s]svrcd[%s] 01 [%d] [%s]", szSysCd,szRsrcCD,szBaseSvr, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);
+	}	   
+	sprintf(SV_DevHome, "%s", trunc_char(SV_DevHome));
+	
+	EXEC SQL
+		SELECT  CM_VOLPATH
+		  INTO	:SV_ProdHome
+		  FROM	CMM0038
+		 WHERE	CM_SysCD  = :szSysCd
+		   AND  CM_SEQNO  = :szSeqNo
+		   AND  CM_SvrCD  = :szSvrCd
+		   AND  CM_RsrcCD = :szRsrcCD;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 2: REAL Server 정보 오류 syscd[%s]rsrccd[%s]svrcd[%s]szSeqNo[%d] [%d] [%s]", szSysCd,szRsrcCD,szSvrCd,szSeqNo,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);
+	}
+
+	/* 미래로 시스템인 경우 배포하는 경로에 WebContent 는 삭제*/
+
+	if (Char_Check(SV_DirPath,"/WebContent/WEB-INF") >= 0){  
+		
+		sprintf(gszLogMsg, "/WebContent/WEB-INF ChangeVolPath before=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+		sprintf(SV_DirPath , "%s", rep_char(SV_DirPath  , "/WebContent", ""));		
+		
+		sprintf(gszLogMsg, "ChangeVolPath after=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+	}
+
+		sprintf(gszLogMsg, "1111111111111111111 before=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+
+                             
+	if (Char_Check(SV_DirPath,"/WebContent") >= 0){  
+		
+		sprintf(gszLogMsg, "/hkc/webdoc/WebContent ChangeVolPath before=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+		sprintf(SV_DirPath , "%s", rep_char(SV_DirPath  , "/WebContent", ""));		
+		
+		sprintf(gszLogMsg, "ChangeVolPath after=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+	}
+
+/* 2018.06.28 삭제 	
+	if (Char_Check(SV_DirPath,"/hkc/webapp/WebContent") >= 0){  
+		
+		sprintf(gszLogMsg, "/hkc/webapp/WebContent ChangeVolPath before=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+		sprintf(SV_DirPath , "%s", rep_char(SV_DirPath  , "/WebContent", ""));		
+		
+		sprintf(gszLogMsg, "ChangeVolPath after=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+	}
+*/
+
+	if (Char_Check(SV_DirPath,"acctwast/WebContent") >= 0){  
+		
+		sprintf(gszLogMsg, "acctwast/WebContent ChangeVolPath before=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+		sprintf(SV_DirPath , "%s", rep_char(SV_DirPath  , "/WebContent", ""));		
+		
+		sprintf(gszLogMsg, "ChangeVolPath after=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+	}
+
+	if (Char_Check(SV_DirPath,"acctwebt/WebContent") >= 0){  
+		
+		sprintf(gszLogMsg, "/acctwebt/WebContent ChangeVolPath before=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+		sprintf(SV_DirPath , "%s", rep_char(SV_DirPath  , "/WebContent", ""));		
+		
+		sprintf(gszLogMsg, "ChangeVolPath after=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+	}
+
+	if (Char_Check(SV_DirPath,"DOWNLOAD") >= 0){  
+		
+		sprintf(gszLogMsg, "DOWNLOAD ChangeVolPath before=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+		sprintf(SV_DirPath , "%s", rep_char(SV_DirPath  , "/DOWNLOAD", ""));		
+		
+		sprintf(gszLogMsg, "ChangeVolPath after=[%s] ", SV_DirPath);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		
+	}
+
+	sprintf(SV_ProdHome, "%s", trunc_char(SV_ProdHome));
+	sprintf(SV_DirPath , "%s", rep_char(SV_DirPath  , "//", "/"));
+	sprintf(SV_ProdHome, "%s", rep_char(SV_ProdHome, "//", "/"));
+	sprintf(SV_DevHome , "%s", rep_char(SV_DevHome , "//", "/"));
+	
+	if (cmp_left_char(SV_DirPath, strlen(SV_DevHome), SV_DevHome) == 0) {
+		sprintf(szChangDirPath1, "%s/%s", SV_ProdHome, right_char(SV_DirPath, strlen(SV_DirPath) - strlen(SV_DevHome)));
+		sprintf(szChangDirPath, "%s", rep_char(szChangDirPath1, "//", "/"));
+	}
+	else {
+		sprintf(szChangDirPath, "%s", SV_DirPath);
+	}
+	
+}
+
+/*---------------------------------------------------------------*/
+/*	Function  : ChangeVolPath_Local                              */
+/*	Action    : 서버별 적용 디렉토리 변환                        */
+/*	Parameter : szSysCd        : 시스템코드                      */
+/*              szSvrCd        : 서버구분                        */
+/*              szRsrcCD       : 프로그램종류                    */
+/*              szSeqNo        : 서버일련번호                    */
+/*              szDirPath      : 디렉토리                        */
+/*              szChangDirPath : 변환디렉토리                    */
+/*              szEditor       : 요청자                          */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	ChangeVolPath_Local	( char *szSysCd
+					   	    , char *szRsrcCD
+						    , char *szEditor
+						    , char *szDirPath
+						    , char *szChangDirPath
+						    )
+{
+char	SV_DevHome	             [dfDir];
+char	SV_ProdHome	             [dfDir];
+char	szChangDirPath1	         [dfDir];
+char	szBaseSvr                  [2+1];
+int     nCnt = 0;
+
+	memset(szBaseSvr, 0x00, sizeof(szBaseSvr));
+	
+	EXEC SQL
+		SELECT  CM_DIRBASE
+		  INTO  :szBaseSvr
+		  FROM  CMM0030
+		 WHERE  CM_SYSCD = :szSysCd;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: 기준 SVR GET ERR [%s] 01 [%d] [%s]", szSysCd, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return;
+	}
+	NotUseDataTruncate (szBaseSvr, 0x20);
+
+	memset(szChangDirPath, 0x00, sizeof(szChangDirPath));
+		
+    EXEC SQL
+		SELECT  B.CM_VOLPATH
+		  INTO	:SV_DevHome
+		  FROM	CMM0038 A
+		      , CMM0031 B
+		 WHERE	A.CM_SysCD  = :szSysCd
+		   AND  A.CM_SvrCD  = :szBaseSvr
+		   AND  A.CM_RsrcCD = :szRsrcCD
+		   AND  A.CM_SYSCD	= B.CM_SYSCD
+		   AND  A.CM_SVRCD  = B.CM_SVRCD
+		   AND  A.CM_SEQNO	= B.CM_SEQNO
+		   AND  B.CM_CLOSEDT IS NULL
+		   AND  NVL(B.CM_CMPSVR,'N') = 'Y'
+		   AND  ROWNUM=1;
+    if (sqlca.sqlcode == 1403) {
+		EXEC SQL
+			SELECT  B.CM_VOLPATH
+			  INTO	:SV_DevHome
+			  FROM	CMM0038 A
+			      , CMM0031 B
+			 WHERE	A.CM_SysCD  = :szSysCd
+			   AND  A.CM_SvrCD  = :szBaseSvr
+			   AND  A.CM_RsrcCD = :szRsrcCD
+			   AND  A.CM_SYSCD	= B.CM_SYSCD
+			   AND  A.CM_SVRCD  = B.CM_SVRCD
+			   AND  A.CM_SEQNO	= B.CM_SEQNO
+			   AND  B.CM_CLOSEDT IS NULL
+			   AND  ROWNUM=1;   
+	}			   
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: Directory Base Server 정보 오류 syscd[%s]rsrccd[%s]svrcd[%s] 01 [%d] [%s]", szSysCd,szRsrcCD,szBaseSvr, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);
+	}	   
+	sprintf(SV_DevHome, "%s", trunc_char(SV_DevHome));
+	
+	EXEC SQL
+		SELECT  CD_DEVHOME
+		  INTO	:SV_ProdHome
+		  FROM	CMD0300
+		 WHERE	CD_SYSCD  = :szSysCd
+		   AND  CD_USERID = :szEditor;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 2: User HomeDirectory 정보 오류 syscd[%s]rsrccd[%s]editor[%s] [%d] [%s]", szSysCd,szRsrcCD,szEditor,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);
+	}
+
+	sprintf(SV_ProdHome, "%s", trunc_char(SV_ProdHome));
+	sprintf(szDirPath  , "%s", rep_char(szDirPath  , "//", "/"));
+	sprintf(SV_ProdHome, "%s", rep_char(SV_ProdHome, "//", "/"));
+	sprintf(SV_DevHome , "%s", rep_char(SV_DevHome , "//", "/"));
+	
+	if (cmp_left_char(szDirPath, strlen(SV_DevHome), SV_DevHome) == 0) {
+		
+		sprintf(szChangDirPath1, "%s/%s", SV_ProdHome, right_char(szDirPath, strlen(szDirPath) - strlen(SV_DevHome)));
+		sprintf(szChangDirPath, "%s", rep_char(szChangDirPath1, "//", "/"));
+	}
+	else {
+		
+		sprintf(szChangDirPath, "%s", szDirPath);
+	}
+}
+/*---------------------------------------------------------------*/
+/*	Function  : Result_Make                                      */
+/*	Action    : 결과파일작성                                     */
+/*	Parameter :	pRstFile  : 결과파일                             */
+/*	            pcomment  : 결과문구                             */
+/*	            pSvrIp    : 서버주소                             */
+/*	            pPrcSys   : 처리단계                             */
+/*	            pRstCond  : 처리결과코드                         */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	Result_Make	( char *pRstFile
+					, char *pcomment
+					, char *pSvrIp
+					, char *pPrcSys
+					, char *pRstCond
+					)
+{
+char	szSysDate	               [8+1];
+char	szNSysDate	              [10+1];
+char 	szSysTime                   [16];
+FILE *RstPtr;
+
+	Get_Sys_Date(szSysDate);
+	Conver_Date (szSysDate, szNSysDate);
+
+	Get_Sys_Time20(szSysTime);
+	
+	RstPtr = fopen (pRstFile, "a+");
+	if (RstPtr == NULL)	{
+		sprintf(gszLogMsg, "Result_Make : Result File Create Error [%s]",  pRstFile);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return;
+	}
+	
+	fprintf (RstPtr, ">>> SERVER [%s] 작업처리내용 : [%s] [%s %s]\n\n", pSvrIp, pPrcSys,szNSysDate,szSysTime);
+	fprintf (RstPtr, "%s\n",pcomment);
+	fprintf (RstPtr, "\n처리결과 = [%s]\n", pRstCond);
+	fclose  (RstPtr);
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : SrcBack_Local                                    */
+/*	Action    : eCAMS 버전소스 관리 위치                         */
+/*	Parameter : NONE                                             */
+/*	Return    : 정상 : TRUE, 오류 : FALSE                        */
+/*---------------------------------------------------------------*/
+int 	SrcBack_Local	(
+						)
+{
+int 	nCnt                            ;
+
+    /*-----------------------------------------------------------*/
+    /*   버전파일을 DB로 관리하는지 여부 체크                    */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  NVL(COUNT(*), 0)
+		  INTO  :nCnt
+		  FROM  CMM0010
+		 WHERE  NVL(CM_SRCLOC, 'D') = 'F'
+		   AND  CM_STNO='ECAMS';
+
+	if (sqlca.sqlcode != 0)
+		nCnt = 0;
+
+	if (nCnt == 0)
+		return FALSE;
+
+	return TRUE;
+}
+
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : Server_Buff_Size                                 */
+/*	Action    : 소켓 버퍼사이즈 SET                              */
+/*	Parameter : pSysCD     : 시스템코드                          */
+/*	            pSvrCD     : 서버구분코드                        */
+/*	            pSvrSeqNo  : 서버일련번호                        */
+/*	Return    : 정상 : TRUE, 오류 : FALSE                        */
+/*---------------------------------------------------------------*/
+int 	Server_Buff_Size	( char *pSysCD
+							, char *pSvrCD
+							, int   pSvrSeqNo
+							)
+{
+	/*-----------------------------------------------------------*/
+	/*	소켓 버퍼사이즈 SET                                      */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  NVL(CM_BUFFSIZE, 0)
+		  INTO  :dfMaxFileSize
+		  FROM  CMM0031
+		 WHERE  CM_SYSCD = :pSysCD
+		   AND  CM_SVRCD = :pSvrCD
+		   AND  CM_SEQNO = :pSvrSeqNo;
+
+	if (sqlca.sqlcode != 0)
+		return FALSE;
+
+	return TRUE;
+
+}
+
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : ChangeVolPathPFM_RSRCID_Trunc                    */
+/*	Action    : 서버별 적용 디렉토리 변환                        */
+/*	Parameter : szSysCd        : 시스템코드                      */
+/*              szSvrCd        : 서버구분                        */
+/*              szRsrcCD       : 프로그램종류                    */
+/*              szSeqNo        : 서버일련번호                    */
+/*	            szBaseName     : 기준프로그램                    */
+/*              szDirPath      : 디렉토리                        */
+/*              szChangDirPath : 변환디렉토리                    */
+/*	Return    : NONE                                             */
+/*---------------------------------------------------------------*/
+void	ChangeVolPathPFM_RSRCID_Trunc	( char *szSysCd
+										, char *szSvrCd
+										, char *szRsrcCD
+										, int   szSeqNo
+										, char *szBaseName
+										, char *szDirPath
+										, char *szChangDirPath
+										)
+{
+char	SV_DevHome	             [dfDir];
+char	SV_ProdHome	             [dfDir];
+char	szChangDirPath1	         [dfDir];
+char	szBaseSvr                  [2+1];
+
+	memset(szBaseSvr, 0x00, sizeof(szBaseSvr));
+
+	EXEC SQL
+		SELECT  CM_DIRBASE
+		  INTO  :szBaseSvr
+		  FROM  CMM0030
+		 WHERE  CM_SYSCD = :szSysCd;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: 기준 SVR GET ERR [%s] 01 [%d] [%s]", szSysCd, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		return;
+	}
+	NotUseDataTruncate (szBaseSvr, 0x20);
+
+	memset(szChangDirPath, 0x00, sizeof(szChangDirPath));
+
+	EXEC SQL
+		SELECT  A.CM_VOLPATH
+		  INTO	:SV_DevHome
+		  FROM	CMM0038 A
+		      , CMM0031 B
+		 WHERE	A.CM_SysCD  = :szSysCd
+		   AND  A.CM_SvrCD  = :szBaseSvr
+		   AND  A.CM_RsrcCD = :szRsrcCD
+		   AND  A.CM_SYSCD	= B.CM_SYSCD
+		   AND  A.CM_SVRCD  = B.CM_SVRCD
+		   AND  A.CM_SEQNO	= B.CM_SEQNO
+		   AND  B.CM_CLOSEDT IS NULL
+		   AND  B.CM_SVRSTOP = 'N';
+
+	sprintf(SV_DevHome, "%s", trunc_char(SV_DevHome));
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 1: TEST Server 정보 오류 syscd[%s]rsrccd[%s]svrcd[%s] 01 [%d] [%s]", szSysCd,szRsrcCD,szBaseSvr, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);
+	}
+
+	EXEC SQL
+		SELECT  CM_VOLPATH
+		  INTO	:SV_ProdHome
+		  FROM	CMM0038
+		 WHERE	CM_SysCD  = :szSysCd
+		   AND  CM_SEQNO  = :szSeqNo
+		   AND  CM_SvrCD  = :szSvrCd
+		   AND  CM_RsrcCD = :szRsrcCD;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(gszLogMsg, "SQLErrCheck 2: REAL Server 정보 오류 syscd[%s]rsrccd[%s]svrcd[%s]szSeqNo[%d] [%d] [%s]", szSysCd,szRsrcCD,szSvrCd,szSeqNo,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+		exit (1);
+	}
+
+	sprintf(SV_ProdHome, "%s", trunc_char(SV_ProdHome));
+	sprintf(szDirPath  , "%s", rep_char(szDirPath  , "//", "/"));
+	sprintf(SV_ProdHome, "%s", rep_char(SV_ProdHome, "//", "/"));
+	sprintf(SV_DevHome , "%s", rep_char(SV_DevHome , "//", "/"));
+		
+	if (cmp_left_char(szDirPath, strlen(SV_DevHome), SV_DevHome) == 0) {
+		if (strcmp(szDirPath, SV_DevHome) == 0) {
+			sprintf(szChangDirPath1, "%s", szDirPath);
+			sprintf(szChangDirPath , "%s", rep_char(szChangDirPath1, "//", "/"));
+		}
+		else {
+			sprintf(szChangDirPath1, "%s/%s", SV_ProdHome, right_char(szDirPath, strlen(szDirPath) - strlen(SV_DevHome) - strlen(szBaseName)-1));
+			sprintf(szChangDirPath, "%s", rep_char(szChangDirPath1, "//", "/"));
+		}
+	}
+	else {
+		sprintf(szChangDirPath, "%s", szDirPath);
+	}
+}
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

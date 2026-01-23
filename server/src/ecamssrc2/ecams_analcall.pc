@@ -1,0 +1,800 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_analcall.pc                            │
+ ├──────┼───────────────────────┤
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2014. 04. 19                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                         */
+/*---------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                   */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                   */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+char gszLogFile[50];	/*Log File Name*/
+char gszLogPath[100];	/*Log File Path*/
+char gszLogMsg[512];	/*Log Message  */
+char gszTempPath[100];	/*Temp Direcotry*/
+
+
+int		main (int argc, char **argv, char **envp)
+{
+	char	szSysCD[6];
+	char	szRsrcCD[3];
+	char    szRelatSysCD[6];
+	char    szRelatRsrcCD[3];
+	char	szDsnCD[8];
+	char    szBinDsnCD[8];
+	char	szRsrcName[512];
+	char	szItemId[13];
+	char    szMakeItemID[13];
+	char    szPrcItemId[13];
+	char	szSvrIP[21];
+	int		nPortNo;
+	int     nSeqNo = 0;
+	char	szShlPath[512];
+	char	szDirPath[512];
+	char	szDirPathTmp[512];
+	char	szEditor[20];
+	char	szLocal[1024];
+	char	szRemote[1024];
+	char    szResultFile[512];
+	char    szRstMsg[512];
+
+
+	CMD_INFO	  CmdInfo;
+	
+	char	szAgentDir[512];
+
+	char    szGbnCd[2];
+	char    szSysOS[3];
+	char	szCommand[1000];
+	char    szBaseRsrcCD[3];
+	
+	char    szGubun[10];
+	char    szBasePgm[100];
+	char    szBasePgmFullPath[100];
+	char    srcBinGubun[1+1];
+	char    szRelatPgm[100];
+	char    szRelatPgmFullPath[100];
+	char    szBinPgm[100];
+	char    szBinPgmFullPath[100];
+	char    szShell[20];
+	char    szTempPgm[10];
+	char    dummy[2048];
+	char    *dataBuff[10];
+	char    *token;
+	int     nBinGubun  = 0;
+	char    tempFile [20];
+	int     szSvrSeq = 0;
+	int     test = 0;
+	int     nCnt = 0;
+	
+	int     index = 0;
+	FILE 	*fptr1;
+		
+	if (argc < 3) {
+        printf ("Usage : %s <구분:1.RELAT 2.META> <프로그램고유번호:ITEMID> <사용자ID> \n", argv[0]);
+        exit (0);
+    }
+    
+    /*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	sprintf(gszLogPath,"%s/",getenv("LOGDIR"));
+	InitCmdInfo(&CmdInfo);
+
+	strcpy(CmdInfo.szAcptNo,szItemId);
+	sprintf(CmdInfo.szLogFile,"%sTransList.%s",gszLogPath,gszLogFile);	
+	
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE){
+		/*LOG*/sprintf(gszLogMsg,"[ecams_analcall] DB Connect Error \n");
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+	 
+	memset(szSysCD       , 0x00, sizeof(szSysCD       ));
+	memset(szRsrcCD      , 0x00, sizeof(szRsrcCD      ));
+	memset(szBaseRsrcCD  , 0x00, sizeof(szBaseRsrcCD  ));
+	memset(szRelatSysCD  , 0x00, sizeof(szRelatSysCD  ));
+	memset(szRelatRsrcCD , 0x00, sizeof(szRelatRsrcCD ));
+	memset(szDsnCD       , 0x00, sizeof(szDsnCD       ));
+	memset(szRsrcName    , 0x00, sizeof(szRsrcName    ));
+	memset(szSvrIP       , 0x00, sizeof(szSvrIP       ));
+	memset(szEditor      , 0x00, sizeof(szEditor      ));
+	memset(szItemId      , 0x00, sizeof(szItemId      ));
+	memset(szGbnCd       , 0x00, sizeof(szGbnCd       ));
+	memset(szAgentDir    , 0x00, sizeof(szAgentDir    ));
+	memset(szDirPathTmp  , 0x00, sizeof(szDirPathTmp  ));
+	memset(szShell       , 0x00, sizeof(szShell       ));
+    
+    
+	sprintf(szGubun   , "%s", argv[1]);
+	sprintf(szItemId  , "%s", argv[2]);
+	sprintf(szEditor  , "%s", argv[3]);
+	
+	NotUseDataTruncate (szGubun   , 0x20);
+	NotUseDataTruncate (szItemId  , 0x20);
+	NotUseDataTruncate (szEditor  , 0x20);
+
+	memset(gszTempPath,0x00,sizeof(gszTempPath));
+	SetTempDir("99",gszTempPath);
+	
+	/*LOG*/sprintf(gszLogMsg,"[ecams_analcall] [%s] 영향분석 Shell Script 처리 시작 [%s] \n",szGubun,szItemId);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+
+	/*-----------------------------------------------------------*/
+	/* 시스템정보 및 프로그램 가져오기	                         */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+	    SELECT A.CR_SYSCD
+	         , A.CR_RSRCCD
+	         , A.CR_RSRCNAME
+	         , B.CM_DIRPATH
+	      INTO :szSysCD
+	         , :szBaseRsrcCD
+	         , :szRsrcName
+	         , :szDirPath
+	      FROM CMM0070 B,CMR0020 A
+	     WHERE A.CR_ITEMID = :szItemId
+	       AND A.CR_SYSCD=B.CM_SYSCD
+	       AND A.CR_DSNCD=B.CM_DSNCD;
+
+	if (sqlca.sqlcode != 0){
+		sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] SYSTEM Info Get Err [%s] ",
+					sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szItemId);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	}
+	
+	NotUseDataTruncate (szSysCD   , 0x20);	
+	NotUseDataTruncate (szBaseRsrcCD  , 0x20);
+	sprintf(szRsrcName, "%s", trunc_char(szRsrcName));
+	sprintf(szDirPath , "%s", trunc_char(szDirPath ));	
+
+	/*LOG*/sprintf(gszLogMsg,"[ecams_analcall] 서버정보 Get 처리 시작 [%s][%s][%s] \n",szSysCD,szDirPath,szRsrcName);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+
+	
+	/*-----------------------------------------------------------*/
+	/* 서버Ip,Port, AgentDir 정보 가져오기                       */
+	/*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  a.CM_SYSOS
+		       ,a.CM_SVRIP
+		       ,a.CM_PORTNO
+		       ,a.cm_dir
+		       ,a.CM_SEQNO
+		  INTO	:szSysOS
+		  	   ,:szSvrIP
+		  	   ,:nPortNo
+		  	   ,:szAgentDir
+		  	   , :szSvrSeq
+		  FROM	CMM0031 a, CMM0038 b
+		 WHERE	a.CM_SysCD  = :szSysCD
+		   AND  a.CM_SVRCD  = '23'
+		   AND  a.CM_CLOSEDT IS NULL
+		   AND	a.CM_SysCd  = b.CM_SysCd
+		   AND	a.CM_SvrCd  = b.CM_SvrCd
+		   AND	a.CM_SEQNO  = b.CM_SEQNO
+		   AND	b.CM_RsrcCD = :szBaseRsrcCD;
+		   	
+	if (sqlca.sqlcode != 0){
+		sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] SERVER Info Get Err [%s] [%s][%s] [%s] "
+					,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, szSysCD,szBaseRsrcCD,szDirPath,szRsrcName);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	}
+
+	NotUseDataTruncate (szSysOS    , 0x20);	
+	NotUseDataTruncate (szSvrIP    , 0x20);	
+	NotUseDataTruncate (szAgentDir , 0x20);
+	
+	/*LOG*/sprintf(gszLogMsg,"[ecams_analcall] [%s][%s][%s] 서버Ip,Port, AgentDir 정보 가져오기 [%s][%d] \n",szSysCD,szDirPath,szRsrcName,szSvrIP,nPortNo);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+
+	
+	/*-----------------------------------------------------------*/
+	/* 호풀할 프로그램과 스크립트 정보 가져오기                  */
+	/*-----------------------------------------------------------*/
+
+	EXEC SQL
+		SELECT CM_DIRPATH
+		     , CM_SHELL
+		INTO :szShlPath
+		   , :szShell
+		FROM CMM0039
+		WHERE CM_SYSCD  = :szSysCD
+		AND   CM_DIRCD = 'AN';
+
+	if (sqlca.sqlcode != 0){
+		sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] Script Info Get Err  : [%s] ",
+					sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc,szSysCD);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	}
+		
+	NotUseDataTruncate (szShlPath   , 0x20);	
+	NotUseDataTruncate (szShell     , 0x20);
+	
+	ChangeVolPath(szSysCD , "23" , szBaseRsrcCD, szSvrSeq, szDirPath, szDirPathTmp);
+	if (cmp_right_char(szDirPathTmp, 1, "/") != 0) {
+		sprintf(szDirPath,"%s%s", szDirPathTmp,"/");
+	}
+	sprintf(szResultFile , "%s.anal",szItemId);
+	sprintf(CmdInfo.szServerIP,"%s",szSvrIP);
+	CmdInfo.nPort = nPortNo;
+	sprintf(CmdInfo.szCommand,"cd %s/bin;./%s %s %s%s %s/fout/%s",szShlPath,szShell,szRsrcName,szDirPath,szRsrcName, szShlPath,szResultFile);						
+	strcpy(CmdInfo.szJobGub, "S");
+	Server_Cmd_JOB(&CmdInfo);
+
+	if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+		sprintf(gszLogMsg,"[ecams_analcall] 영향분석 쉘실행 실패 : [%s] [%d] [%s] [%s]",szSvrIP,nPortNo,CmdInfo.szCommand,CmdInfo.szRstCond);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);	
+	} 
+    	
+	sprintf(szLocal,"%s/%s",gszTempPath,szResultFile);
+	if (access(szLocal,F_OK) == 0) {
+		remove(szLocal);
+	}			
+	sprintf(CmdInfo.szRemote,"%s/fout/%s",szShlPath,szResultFile);
+	sprintf(CmdInfo.szLocal,"%s",szLocal);						
+	strcpy(CmdInfo.szJobGub, "G");				
+	Server_Cmd_JOB(&CmdInfo);
+	if (memcmp(CmdInfo.szRstCond, "0000", 4) != 0){			
+		sprintf(gszLogMsg,"[ecams_analcall] [%s][%s][%s] 영향분석 쉘실행결과파일 수신 실패 : [%s][%s] [%d] [%s] [%s]",
+		         szSysCD,szDirPath,szRsrcName,szSvrIP,nPortNo,szLocal, CmdInfo.szRemote,CmdInfo.szRstCond);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);										
+	}
+	sprintf(CmdInfo.szCommand,"rm -rf %s",CmdInfo.szRemote);						
+	strcpy(CmdInfo.szJobGub, "S");
+	Server_Cmd_JOB(&CmdInfo);
+	
+	sprintf(gszLogMsg,"[ecams_analcall] [%s][%s][%s] 영향분석 쉘실행결과파일 수신 후 삭제 : [%s] [%d] [%s] [%s]",
+	         szSysCD,szDirPath,szRsrcName,szSvrIP,nPortNo,CmdInfo.szCommand,CmdInfo.szRstCond);
+	eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+	
+	if (access(CmdInfo.szLocal,F_OK) != 0) {
+		sprintf(gszLogMsg,"[ecams_analcall] [%s][%s][%s] 영향분석 쉘실행결과파일 없음 :  [%s] [%d] [%s] [%s]",
+		         szSysCD,szDirPath,szRsrcName,szSvrIP,nPortNo, CmdInfo.szRemote,szLocal);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	} else if (FileSizeInf(CmdInfo.szLocal) <= 0) {
+		sprintf(gszLogMsg,"[ecams_analcall] [%s][%s][%s] 영향분석 쉘실행결과파일 Size Zero :  [%s] [%d] [%s] [%s]",
+		         szSysCD,szDirPath,szRsrcName,szSvrIP,nPortNo, CmdInfo.szRemote,szLocal);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+		remove(CmdInfo.szLocal);
+		exit(1);
+	}	
+	/*-----------------------------------------------------------*/
+	/*		처리구분별 처리결과 체크                             */
+	/*-----------------------------------------------------------*/
+ 	 if ((fptr1 = fopen(CmdInfo.szLocal, "r")) == (FILE *) NULL) {
+		sprintf(gszLogMsg,"[ecams_analcall] [%s][%s][%s] 영향분석 쉘실행결과파일 Open Error :  [%s] [%d] [%s] [%s]",
+		         szSysCD,szDirPath,szRsrcName,szSvrIP,nPortNo, CmdInfo.szRemote,szLocal);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);	
+ 	 	remove(CmdInfo.szLocal);
+		exit(1);
+	}	
+	
+	EXEC SQL
+	 DELETE FROM CMD0010
+	  WHERE CD_ITEMID = :szItemId;
+	
+	if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403){
+		sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] DELETE CMD0010 err [%s][%s][%s] ",
+					sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szDirPath,szRsrcName);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	}
+	
+	EXEC SQL
+	  DELETE FROM CMD0011
+	   WHERE CD_ITEMID = :szItemId
+	   	AND  CD_HANDYN = 'N';
+		
+	if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403){
+		sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] DELETE CMD0011 err [%s][%s][%s] ",
+					sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szDirPath,szRsrcName);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		exit(1);
+	}		
+
+	EXEC SQL COMMIT;
+
+	while (fgets(dummy, 2048, fptr1) != (char *) NULL) {
+		strcpy(dummy,(char *)rep_char(dummy,"\r\n",""));
+		strcpy(dummy,(char *)rep_char(dummy,"\n",""));		
+		strcpy(dummy,(char *)trunc_char(dummy));
+
+		while(1){
+			if (index == 0)
+				dataBuff[index] = strtok_r(dummy,";",&token);
+			else
+				dataBuff[index] = strtok_r(NULL,";",&token);
+
+			if (dataBuff[index] == NULL)
+				break;
+			index++;
+		}
+		
+		if (index == 0){
+			exit (1);
+		}
+
+		memset ( szBasePgm         , 0x00 , sizeof ( szBasePgm         ));
+		memset ( szBasePgmFullPath , 0x00 , sizeof ( szBasePgmFullPath ));
+		memset ( srcBinGubun       , 0x00 , sizeof ( srcBinGubun       ));
+		memset ( szRelatPgm        , 0x00 , sizeof ( szRelatPgm        ));
+		memset ( szRelatPgmFullPath, 0x00 , sizeof ( szRelatPgmFullPath));
+		memset ( szBinPgm          , 0x00 , sizeof ( szBinPgm          ));
+		memset ( szBinPgmFullPath  , 0x00 , sizeof ( szBinPgmFullPath  ));
+		memset ( szTempPgm         , 0x00 , sizeof ( szTempPgm         ));
+
+		strcpy ( szBasePgm , dataBuff[0] );
+		strcpy ( szBasePgmFullPath , dataBuff[1] );
+		strcpy ( srcBinGubun , dataBuff[2] );
+		strcpy ( szRelatPgm , dataBuff[3] );
+		strcpy ( szRelatPgmFullPath , dataBuff[4] );
+		
+		sprintf(szBasePgmFullPath, "%s", left_char(szBasePgmFullPath,  Right_Char_Check(szBasePgmFullPath, '/')-1));
+		sprintf(szRelatPgmFullPath, "%s", left_char(szRelatPgmFullPath,  Right_Char_Check(szRelatPgmFullPath, '/')-1));
+
+		if ( strcmp(szBasePgm, "END" ) == 0)
+			break;
+
+
+		if ( index > 5 )
+		{
+			strcpy ( szBinPgm           , dataBuff[5] );
+			strcpy ( szBinPgmFullPath   , dataBuff[6] );
+
+			sprintf(szBinPgmFullPath, "%s", left_char(szBinPgmFullPath,  Right_Char_Check(szBinPgmFullPath, '/')-1));
+			
+			nBinGubun = TRUE;
+
+		} else {
+
+			nBinGubun = FALSE;
+		}			
+		
+
+		sprintf(gszLogMsg,"[ecams_analcall] szBasePgm[%s] szBasePgmFullPath[%s] srcBinGubun[%s] szRelatPgm[%s] szRelatPgmFullPath[%s] szBinPgm[%s] szBinPgmFullPath[%s]",
+							szBasePgm , szBasePgmFullPath ,srcBinGubun ,szRelatPgm ,szRelatPgmFullPath,szBinPgm,  szBinPgmFullPath);
+		eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+		
+
+		index = 0;
+		
+		/*-----------------------------------------------------------*/
+		/*		기준프로그램 ITEM ID                                 */
+		/*		1. 구분자 : S ( 소스기준)                            */
+		/*-----------------------------------------------------------*/
+		if ( strcmp ( srcBinGubun, "S" ) == 0 )
+		{
+			/*-----------------------------------------------------------*/
+			/*		관련 프로그램  ITEM ID                               */
+			/*-----------------------------------------------------------*/
+			EXEC SQL
+			  SELECT A.CR_ITEMID,A.CR_DSNCD,A.CR_RSRCCD
+			    INTO :szMakeItemID,:szDsnCD,:szRelatRsrcCD
+			    FROM CMR0020 A, CMM0070 B
+			   WHERE A.CR_SYSCD    = :szSysCD
+			   	 AND A.CR_RSRCNAME = :szRelatPgm
+			   	 AND A.CR_SYSCD    = B.CM_SYSCD
+			   	 AND B.CM_DIRPATH  = :szRelatPgmFullPath
+			   	 AND A.CR_DSNCD    = B.CM_DSNCD;
+    		
+			if (sqlca.sqlcode != 0){
+				sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] 관련 프로그램 CMR0020 ITEMID get err [%s][%s][%s] ",
+							sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD, szRelatPgmFullPath,szRelatPgm);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				continue;
+			} 
+			NotUseDataTruncate (szMakeItemID, 0x20);	
+			NotUseDataTruncate (szDsnCD     , 0x20);	
+			NotUseDataTruncate (szRelatRsrcCD, 0x20);
+							   
+            EXEC SQL
+			  DELETE FROM CMD0011
+			   WHERE CD_ITEMID = :szMakeItemID
+			   	AND  CD_HANDYN = 'N';
+			
+			if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403){
+				sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] DELETE CMD0011 err [%s][%s][%s] ",
+							sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szDirPath,szRsrcName);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				exit(1);
+			}
+			EXEC SQL COMMIT;	
+				
+			EXEC SQL
+			  DELETE FROM CMD0010
+			   WHERE CD_ITEMID  = :szMakeItemID
+			   	AND  CD_COMPSEQ = 0;
+			
+			if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403){
+				sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] DELETE CMD0010 Meta err [%s][%s][%s] ",
+							sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szDirPath,szRsrcName);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				exit(1);
+			}
+			EXEC SQL COMMIT;	
+			
+			nSeqNo++;
+			EXEC SQL
+			   SELECT COUNT(*)
+			     INTO :nCnt
+			     FROM CMD0010
+			    WHERE CD_ITEMID=:szItemId
+			      AND CD_MAKEITEM=:szMakeItemID;
+			
+			if (nCnt == 0) {
+				EXEC SQL
+				    INSERT INTO CMD0010(CD_ITEMID, CD_MAKEITEM, CD_EDITOR, CD_LASTDT, CD_COMPSEQ) 
+					VALUES(:szItemId , :szMakeItemID, :szEditor, SYSDATE, :nSeqNo);
+				
+				if (sqlca.sqlcode !=0 ){
+					sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] Insert CMD0010 err [%s][%s][%s][%s][%s]"
+								,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szRelatPgmFullPath,szRelatPgm,szMakeItemID,szItemId );
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+					remove(CmdInfo.szLocal);				
+					exit(1);
+				}
+	
+				EXEC SQL COMMIT;
+			}
+			
+			/*-----------------------------------------------------------*/
+			/*		Binary szBinPgm/szBinPgmFullPath 있을경우            */
+			/*		nBinGubun == TRUE 일경우                             */
+			/*-----------------------------------------------------------*/
+			if ( nBinGubun == TRUE ) {		
+				/*-----------------------------------------------------------*/
+				/*		관련 프로그램  ITEM ID                               */
+				/*-----------------------------------------------------------*/
+				EXEC SQL
+				    SELECT CM_DSNCD
+				      INTO :szBinDsnCD
+				      FROM CMM0070
+				     WHERE CM_SYSCD=:szSysCD
+				       AND CM_DIRPATH=:szBinPgmFullPath;
+				if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403){			
+					sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] CMM0070 DsnCD get err [%s][%s][%s] ",
+									sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szBinPgmFullPath,szBinPgm);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					remove(CmdInfo.szLocal);
+					exit(1);
+				} else if (sqlca.sqlcode == 1403) {					       	
+		    		EXEC SQL
+						SELECT lpad(nvl(MAX(CM_DSNCD),0) + 1,7,'0')
+						  INTO :szBinDsnCD
+						  FROM CMM0070
+					     WHERE CM_SYSCD = :szSysCD;
+					
+					if (sqlca.sqlcode != 0){			
+						sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] CMM0070 DsnCD get err [%s][%s][%s] ",
+										sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szBinPgmFullPath,szBinPgm);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						remove(CmdInfo.szLocal);
+						exit(1);
+					}
+					
+					NotUseDataTruncate (szBinDsnCD, 0x20);
+							 
+					EXEC SQL
+						INSERT INTO CMM0070 ( CM_SYSCD, CM_DSNCD, CM_DIRPATH,CM_EDITOR, CM_OPENDT, CM_LASTUPDT, CM_RUNSTA) 
+						VALUES (:szSysCD,:szBinDsnCD,:szBinPgmFullPath,:szEditor,sysdate,sysdate,0);
+		    	    
+					if (sqlca.sqlcode != 0 ){
+						sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] insert new CM_DSNCD INTO CMM0070  ERROR : [%s] [%s][%s]",
+											sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szDsnCD,szBinPgmFullPath);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						remove(CmdInfo.szLocal);
+						exit(1);
+					}
+				} else {
+					NotUseDataTruncate (szBinDsnCD     , 0x20);
+				}	
+				
+				EXEC SQL
+				  SELECT A.CR_ITEMID
+				    INTO :szPrcItemId
+				    FROM CMR0020 A
+				   WHERE A.CR_SYSCD = :szSysCD
+				   	 AND A.CR_RSRCNAME = :szBinPgm
+				   	 AND A.CR_DSNCD    = :szBinDsnCD;    			
+				if (sqlca.sqlcode != 0){
+					if ( sqlca.sqlcode == 1403 )
+					{  	
+						
+						/* Binary 프로그램유형 추출 */
+						EXEC SQL
+							SELECT B.CM_RSRCCD
+							 INTO :szRsrcCD
+ 							 FROM CMM0037 A,CMM0036 B
+ 							WHERE A.CM_SYSCD= :szSysCD                /*관련프로그램시스템코드*/
+ 							  AND A.CM_RSRCCD=:szRelatRsrcCD           /*관련프로그램RSRCCD    */
+ 							  AND A.CM_FACTCD='09'
+ 							  AND A.CM_SYSCD=B.CM_SYSCD
+ 							  AND A.CM_SAMERSRC=B.CM_RSRCCD
+ 							  AND B.CM_CLOSEDT IS NULL
+ 							  AND SUBSTR(B.CM_INFO,26,1)='1';
+        	
+						if (sqlca.sqlcode != 0){
+							sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] [Bin] CMM0036 RSRCCD get err [%s] [%s]",
+										sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szRelatSysCD,szRelatRsrcCD);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+							remove(CmdInfo.szLocal);
+							exit(1);
+						}
+        	
+							   
+						NotUseDataTruncate (szRsrcCD   , 0x20);   							   
+						
+						EXEC SQL
+							insert into cmr0020 (cr_syscd   , cr_itemid  , cr_dsncd  , cr_rsrcname , cr_rsrccd, 
+							                     cr_jobcd   , cr_langcd  , cr_status , cr_creator  , cr_story , 
+							                     cr_opendate, cr_lastdate, cr_lstver , cr_editor   , cr_nomodify, 
+							                     cr_lstusr  ,cr_lstdat   ,cr_owner) 
+							(select cr_syscd     , lpad(ITEMID_SEQ.nextval,12,'0') , :szBinDsnCD , :szBinPgm , :szRsrcCD , 
+							        cr_jobcd     , cr_langcd                       , '3'       , :szEditor, :szBinPgm, 
+							        sysdate      , sysdate                         , '0'       , :szEditor , '0'       , 
+							        :szEditor    , sysdate                         , :szEditor
+							   from cmr0020 
+							  where cr_itemid   = :szItemId);
+						 
+						if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1){
+							/*LOG*/sprintf(gszLogMsg,"[ecams_analcall] [%d] [%s] 자원 명세(CMR0020) INSERT 실패 [%s][%s][%s][%s] ",
+									 sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szBinPgm,szDsnCD,szRsrcCD);
+							EXEC SQL ROLLBACK;
+							remove(CmdInfo.szLocal);
+							exit (1);
+						}					
+						EXEC SQL COMMIT;
+						
+						/* CMR0020 INSERT 후 ITEMID GET */
+						EXEC SQL
+						  SELECT A.CR_ITEMID
+						    INTO :szPrcItemId
+						    FROM CMR0020 A
+						   WHERE A.CR_SYSCD = :szSysCD
+						   	 AND A.CR_DSNCD = :szBinDsnCD
+						   	 AND A.CR_RSRCNAME = :szBinPgm;
+						if (sqlca.sqlcode != 0) {
+							sprintf(gszLogMsg,"[ecams_analcall] [%s][%s] (바이너리)관련 프로그램 Insert후 CMR0020 ITEMID Get Err [%s] [%s][%s][%s] ",
+										sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szBinPgm,szSysCD,szBinPgmFullPath,szDsnCD);
+							eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+							remove(CmdInfo.szLocal);
+							exit(1);
+						}	
+        	
+						NotUseDataTruncate (szPrcItemId, 0x20);
+					} else {
+						sprintf(gszLogMsg,"[ecams_analcall] [%s][%s] (바이너리)관련 프로그램 CMR0020 ITEMID Get Err [%s] [%s][%s] ",
+									sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szBinPgm,szSysCD,szBinPgmFullPath);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						remove(CmdInfo.szLocal);
+						exit(1);
+					}
+				} else {
+					NotUseDataTruncate (szPrcItemId, 0x20);	
+				}
+				EXEC SQL
+				   SELECT COUNT(*)
+				     INTO :nCnt
+				     FROM CMD0011
+				    WHERE CD_ITEMID=:szItemId
+				      AND CD_PRCITEM=:szPrcItemId;
+				if (nCnt == 0) {      	
+					EXEC SQL
+					    INSERT INTO CMD0011
+					        (CD_ITEMID, CD_PRCITEM, CD_EDITOR, CD_LASTDT, CD_HANDYN)
+					     VALUES
+	        	            (:szMakeItemID,:szPrcItemId,:szEditor,SYSDATE,'N');;					
+					if (sqlca.sqlcode !=0 ){
+						/*LOG*/sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] INSERT CMD0011 Err  [%s][%s][%s][%s][%s]\n",
+						     sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szRsrcName,szSysCD,szRelatPgmFullPath,szRelatPgm,szPrcItemId);
+						eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);				
+						remove(CmdInfo.szLocal);				
+						exit(1);
+					}					
+					EXEC SQL COMMIT;
+				}							
+        	
+			} 			
+				
+		/*-----------------------------------------------------------*/
+		/*		기준프로그램 ITEM ID                                 */
+		/*		1. 구분자 : M ( 바이너리 기준)                       */
+		/*-----------------------------------------------------------*/
+		} else if ( strcmp(srcBinGubun , "M" ) == 0) {				
+			/*-----------------------------------------------------------*/
+			/*		관련 프로그램  ITEM ID                               */
+			/*-----------------------------------------------------------*/
+			
+			EXEC SQL
+			    SELECT CM_DSNCD
+			      INTO :szDsnCD
+			      FROM CMM0070
+			     WHERE CM_SYSCD=:szSysCD
+			       AND CM_DIRPATH=:szRelatPgmFullPath;
+			if (sqlca.sqlcode != 0 && sqlca.sqlcode != 1403){			
+				sprintf(gszLogMsg,"[ecams_analcall] Meta [%d][%s] CMM0070 DsnCD get err [%s][%s][%s] ",
+								sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szRelatPgmFullPath,szRelatPgm);
+				eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+				remove(CmdInfo.szLocal);
+				exit(1);
+			} else if (sqlca.sqlcode == 1403) {					       	
+	    		EXEC SQL
+					SELECT lpad(nvl(MAX(CM_DSNCD),0) + 1,7,'0')
+					  INTO :szDsnCD
+					  FROM CMM0070
+				     WHERE CM_SYSCD = :szSysCD;
+				
+				if (sqlca.sqlcode != 0){			
+					sprintf(gszLogMsg,"[ecams_analcall] Meta [%d][%s] CMM0070 DsnCD get err [%s][%s][%s] ",
+									sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szBinPgmFullPath,szRelatPgm);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					remove(CmdInfo.szLocal);
+					exit(1);
+				}
+				
+				NotUseDataTruncate (szDsnCD, 0x20);
+						 
+				EXEC SQL
+					INSERT INTO CMM0070 ( CM_SYSCD, CM_DSNCD, CM_DIRPATH,CM_EDITOR, CM_OPENDT, CM_LASTUPDT, CM_RUNSTA) 
+					VALUES (:szSysCD,:szDsnCD,:szRelatPgmFullPath,:szEditor,sysdate,sysdate,0);
+	    	    
+				if (sqlca.sqlcode != 0 ){
+					sprintf(gszLogMsg,"[ecams_analcall]Meta [%d][%s] insert new CM_DSNCD INTO CMM0070  ERROR : [%s] [%s][%s]",
+										sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szDsnCD,szRelatPgmFullPath);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					remove(CmdInfo.szLocal);
+					exit(1);
+				}
+			} else {
+				NotUseDataTruncate (szDsnCD     , 0x20);
+			}
+			
+			EXEC SQL
+			  SELECT A.CR_ITEMID
+			    INTO :szPrcItemId
+			    FROM CMR0020 A
+			   WHERE A.CR_SYSCD    = :szSysCD
+			   	 AND A.CR_RSRCNAME = :szRelatPgm
+			   	 AND A.CR_DSNCD    = :szDsnCD;	    		
+			if (sqlca.sqlcode != 0){
+				if ( sqlca.sqlcode == 1403 )
+				{
+					/* 메타 프로그램유형 추출*/
+					EXEC SQL
+						SELECT B.CM_RSRCCD
+						  INTO :szRsrcCD
+						  FROM CMM0037 A,CMM0036 B
+						 WHERE A.CM_SYSCD= :szSysCD           /*기준프로그램시스템코드*/
+						   AND A.CM_RSRCCD=:szBaseRsrcCD     /*기준프로그램RSRCCD    */
+						   AND A.CM_FACTCD='04'
+						   AND A.CM_SYSCD=B.CM_SYSCD
+						   AND A.CM_SAMERSRC=B.CM_RSRCCD
+						   AND SUBSTR(B.CM_INFO,26,1)='1'
+						   AND B.CM_CLOSEDT IS NULL;
+						   
+					if (sqlca.sqlcode != 0){
+						sprintf(gszLogMsg,"[ecams_analcall] Meta [%d][%s] [Meta] CMM0036 RSRCCD get err [%s] [%s]",
+									sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szBaseRsrcCD);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						remove(CmdInfo.szLocal);
+						exit(1);
+					}
+						   
+					NotUseDataTruncate (szRsrcCD   , 0x20);   							   
+					
+					EXEC SQL
+						insert into cmr0020 (cr_syscd   , cr_itemid  , cr_dsncd  , cr_rsrcname , cr_rsrccd, 
+						                     cr_jobcd   , cr_langcd  , cr_status , cr_creator  , cr_story , 
+						                     cr_opendate, cr_lastdate, cr_lstver , cr_editor   , cr_nomodify, 
+						                     cr_lstusr  ,cr_lstdat   ,cr_owner) 
+						(select cr_syscd     , lpad(ITEMID_SEQ.nextval,12,'0') , :szDsnCD , :szRelatPgm , :szRsrcCD , 
+						        cr_jobcd     , cr_langcd                       , '3'       , :szEditor, :szRelatPgm, 
+						        sysdate      , sysdate                         , '0'       , :szEditor , '0'       , 
+						        :szEditor    , sysdate                         , :szEditor
+						   from cmr0020 
+						  where cr_itemid   = :szItemId);
+					 
+					if (sqlca.sqlcode != 0 && sqlca.sqlcode != -1){
+						/*LOG*/sprintf(gszLogMsg,"[ecams_analcall] [%d] [%s] 자원 명세(CMR0020) Meta INSERT 실패 [%s][%s][%s][%s] ",
+								 sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szRelatPgm,szDsnCD,szRsrcCD);
+						EXEC SQL ROLLBACK;
+						remove(CmdInfo.szLocal);
+						exit (1);
+					}					
+					EXEC SQL COMMIT;
+					
+					EXEC SQL
+					  SELECT A.CR_ITEMID
+					    INTO :szPrcItemId
+					    FROM CMR0020 A
+					   WHERE A.CR_SYSCD    = :szSysCD
+					   	 AND A.CR_RSRCNAME = :szRelatPgm
+					   	 AND A.CR_DSNCD    = :szDsnCD;	    		
+					if (sqlca.sqlcode != 0){
+						sprintf(gszLogMsg,"[ecams_analcall] [%s][%s] (Meta)관련 프로그램 CMR0020 ITEMID Get Err [%s] [%s][%s] ",
+									sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szRelatPgm,szSysCD,szRelatPgmFullPath);
+						eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+						remove(CmdInfo.szLocal);
+						exit(1);
+					}
+					NotUseDataTruncate (szPrcItemId, 0x20);	
+				} else {
+					sprintf(gszLogMsg,"[ecams_analcall] [%s][%s] (Meta)관련 프로그램 CMR0020 ITEMID Get Err [%s] [%s][%s] ",
+								sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szRelatPgm,szSysCD,szRelatPgmFullPath);
+					eCAMS_Log(gszLogPath, gszLogFile, gszLogMsg);
+					remove(CmdInfo.szLocal);
+					exit(1);
+				}
+			}
+			 else {
+				NotUseDataTruncate (szPrcItemId, 0x20);	
+			}
+			EXEC SQL
+			   SELECT COUNT(*)
+			     INTO :nCnt
+			     FROM CMD0010
+			    WHERE CD_ITEMID=:szItemId
+			      AND CD_MAKEITEM=:szPrcItemId;
+			
+			if (nCnt == 0) {
+				EXEC SQL
+				    INSERT INTO CMD0010(CD_ITEMID, CD_MAKEITEM, CD_EDITOR, CD_LASTDT, CD_COMPSEQ) 
+					VALUES(:szItemId , :szPrcItemId, :szEditor, SYSDATE, 0);
+				
+				if (sqlca.sqlcode !=0 ){
+					sprintf(gszLogMsg,"[ecams_analcall] [%d][%s] Insert CMD0010 Meta err [%s][%s][%s][%s][%s]"
+								,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc,szSysCD,szRelatPgmFullPath,szRelatPgm,szMakeItemID,szItemId );
+					eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);	
+					remove(CmdInfo.szLocal);				
+					exit(1);
+				}
+	
+				EXEC SQL COMMIT;
+			}
+		}
+	}
+	fclose (fptr1);
+	remove(CmdInfo.szLocal);	
+	exit(0);
+		
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

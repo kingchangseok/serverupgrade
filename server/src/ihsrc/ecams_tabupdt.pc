@@ -1,0 +1,596 @@
+/*--------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_tabupdt.pc                             │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ 초기이행 기록 작성 (CMR1000, CMR1010)        │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2012. 03. 20                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+#define		dfMain
+
+
+/*---------------------------------------------------------------*/
+/*		HEADER  FILE  INCLUDE                                    */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+/*---------------------------------------------------------------*/
+/*       Oracle Sql Bind 변수 DEFINE                             */
+/*---------------------------------------------------------------*/
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+#define DEBUG 1
+int 	szTotalCnt                      ;
+int 	szSuccessCnt                    ;
+int 	szErrorCnt                      ;
+char	szStartDate                 [10];
+char	szStartTime                 [10];
+char	szEndDate                   [10];
+char	szEndTime                   [10];
+int 	retval                          ;
+int 	retval1                         ;
+char	szINSysCD                   [10];
+char	szINYYYY                    [10];
+
+
+/*---------------------------------------------------------------*/
+/*		내부함수			                                     */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : CMR1000_Make                                     */
+/*	Action    : CMR1000 작성                                     */
+/*	Parameter : pSYSCD    : 시스템코드                           */
+/*	            pSYSGB    : 시스템구분                           */
+/*	            pACPTDATE : 신청일시                             */
+/*	            pEDITOR   : 신청자                               */
+/*	            pJOBCD    : 업무                                 */
+/*	            pTEAMCD   : 팀구분                               */
+/*	            pACPTNO   : 채번된신청번호                       */
+/*	Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int 	CMR1000_Make	( char *pSYSCD
+						, char *pSYSGB
+						, char *pACPTDATE
+						, char *pEDITOR
+						, char *pJOBCD
+						, char *pTEAMCD
+						, char *pACPTNO
+						)
+{
+char	szAcptNo              [dfAcptNo];
+char	szAcptNo1             [dfAcptNo];
+char	szCurrYYYY                 [4+1];
+
+
+	memset(szAcptNo1, 0x00, sizeof(szAcptNo1));
+	sprintf(szAcptNo1, "%s04", left_char(pACPTDATE, 4));
+	NotUseDataTruncate (szAcptNo1, 0x20);
+
+	/*-----------------------------------------------------------*/
+    /*	신청번호 채번                                            */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  TO_CHAR(SYSDATE, 'YYYY')
+		  INTO  :szCurrYYYY
+		  FROM  DUAL;
+
+	if (sqlca.sqlcode != 0) {
+		return 1;
+	}
+	NotUseDataTruncate (szCurrYYYY, 0x20);
+
+
+	/*-----------------------------------------------------------*/
+    /*	신청번호 채번                                            */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  :szAcptNo1 || LPAD(NVL(MAX(SUBSTR(CR_ACPTNO, 7)), 0) + 1, 6, '0')
+		  INTO  :szAcptNo
+		  FROM  CMR1000
+		 WHERE  SUBSTR(CR_ACPTNO, 1, 6) = :szAcptNo1;
+
+	if (sqlca.sqlcode != 0) {
+		sprintf(szAcptNo, "%s000001", szAcptNo1);
+	}
+
+	NotUseDataTruncate (szAcptNo, 0x20);
+
+	sprintf(pACPTNO, "%s", szAcptNo);
+
+	if (memcmp(szCurrYYYY, szAcptNo1, 4) == 0) {
+		EXEC SQL
+			UPDATE  CMR0010
+			   SET  CR_NO = SUBSTR(:szAcptNo, 7)
+			 WHERE  CR_GUBUN = '04';
+	}
+
+
+	/*-----------------------------------------------------------*/
+    /*	TO-BE TABLE INSERT                                       */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		INSERT INTO CMR1000
+			( CR_ACPTNO
+			, CR_SYSCD
+			, CR_SYSGB
+			, CR_JOBCD
+			, CR_ACPTDATE
+			, CR_STATUS
+			, CR_TEAMCD
+			, CR_QRYCD
+			, CR_PASSOK
+			, CR_EDDATE
+			, CR_PRCDATE
+			, CR_EDITOR
+			, CR_GYULJAE
+			, CR_SAYU
+			)
+		VALUES
+			( :szAcptNo
+		    , LPAD(:pSYSCD, 5, '0')
+		    , :pSYSGB
+		    , :pJOBCD
+		    , TO_DATE(:pACPTDATE, 'YYYYMMDDHH24MISS')
+		    , '9'
+		    , :pTEAMCD
+		    , '04'
+		    , '0'
+		    , TO_DATE(:pACPTDATE, 'YYYYMMDDHH24MISS')
+		    , TO_DATE(:pACPTDATE, 'YYYYMMDDHH24MISS')
+		    , :pEDITOR
+		    , '0'
+		    , '형상관리일괄이행'
+			);
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr, "<%s> <%s> %d %s\n", szAcptNo1, szAcptNo, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		return (1);
+	}
+
+	return (0);
+
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*	Function  : CMR1010_Make                                     */
+/*	Action    : CMR1010 작성                                     */
+/*	Parameter : pSYSCD    : 시스템코드                           */
+/*	            pITEMID   : 프로그램등록번호                     */
+/*	Return    : 0 : 정상, 1 : 오류                               */
+/*---------------------------------------------------------------*/
+int 	CMR1010_Make	( char *pINACPTNO
+						, char *pSYSCD
+						, char *pITEMID
+						, char *pBASEITEM
+						, char *pACPTNO
+						, char *pACPTDATE
+						, char *pPRCDATE
+						, char *pEDITOR
+						)
+{
+char	szAcptNo              [dfAcptNo];
+char	szSYSGB                    [1+1];
+int 	szSerNo                         ;
+char	szJOBCD                [dfJobCD];
+char	szACPTDATE                [14+1];
+char	szPRCDATE                 [14+1];
+char	szTEAMCD                   [100];
+char	szRSRCCD              [dfRsrcCD];
+char	szEDITOR              [dfEditor];
+char	szRSRCNAME          [dfRsrcName];
+char	szBASEPGM           [dfRsrcName];
+char	szBASEDSN              [dfDsnCD];
+char	szBaseItem            [dfItemID];
+char	szDSNCD                [dfDsnCD];
+
+
+	/*-----------------------------------------------------------*/
+    /*	시스템 구분 조회                                         */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_SYSGB
+		  INTO  :szSYSGB
+		  FROM  CMM0030
+		 WHERE  CM_SYSCD = :pSYSCD;
+
+	if (sqlca.sqlcode != 0)
+		memset(szSYSGB, 0x00, sizeof(szSYSGB));
+
+	NotUseDataTruncate (szSYSGB, 0x20);
+
+
+	/*-----------------------------------------------------------*/
+    /*	프로그램 정보 조회                                       */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CR_JOBCD
+		      , TO_CHAR(CR_OPENDATE, 'YYYYMMDDHH24MISS')
+		      , CR_RSRCCD
+		      , CR_CREATOR
+		      , CR_DSNCD
+		      , CR_RSRCNAME
+		      , CR_BASEITEM
+		  INTO  :szJOBCD
+		      , :szPRCDATE
+		      , :szRSRCCD
+		      , :szEDITOR
+		      , :szDSNCD
+		      , :szRSRCNAME
+		      , :szBaseItem
+		  FROM  CMR0020
+		 WHERE  CR_ITEMID = :pITEMID;
+
+	if (sqlca.sqlcode != 0) {
+		return (1);
+	}
+
+	NotUseDataTruncate (szJOBCD   , 0x20);
+	NotUseDataTruncate (szPRCDATE , 0x20);
+	NotUseDataTruncate (szRSRCCD  , 0x20);
+	NotUseDataTruncate (szEDITOR  , 0x20);
+	NotUseDataTruncate (szDSNCD   , 0x20);
+	NotUseDataTruncate (szRSRCNAME, 0x20);
+	NotUseDataTruncate (szBaseItem, 0x20);
+
+
+	/*-----------------------------------------------------------*/
+    /*	기준 프로그램 정보 조회                                  */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CR_DSNCD
+		      , CR_RSRCNAME
+		  INTO  :szBASEDSN
+		      , :szBASEPGM
+		  FROM  CMR0020
+		 WHERE  CR_ITEMID = :szBaseItem;
+
+	if (sqlca.sqlcode != 0) {
+		memset(szBASEDSN, 0x00, sizeof(szBASEDSN));
+		memset(szBASEPGM, 0x00, sizeof(szBASEPGM));
+	}
+
+	NotUseDataTruncate (szBASEDSN, 0x20);
+	NotUseDataTruncate (szBASEPGM, 0x20);
+
+	/*-----------------------------------------------------------*/
+    /*	소속 조회                                                */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		SELECT  CM_PROJECT
+		  INTO  :szTEAMCD
+		  FROM  CMM0040
+		 WHERE  CM_USERID = :szEDITOR;
+
+	if (sqlca.sqlcode != 0) {
+		memset(szTEAMCD, 0x00, sizeof(szTEAMCD));
+	}
+
+	NotUseDataTruncate (szTEAMCD, 0x20);
+
+	/*-----------------------------------------------------------*/
+    /*	신청번호 채번                                            */
+    /*-----------------------------------------------------------*/
+    if (strcmp(pITEMID, pBASEITEM) == 0) {
+    	memset(szAcptNo, 0x00, sizeof(szAcptNo));
+    }
+    else {
+		EXEC SQL
+			SELECT  CR_ACPTNO
+			  INTO  :szAcptNo
+			  FROM  CMR1010
+			 WHERE  CR_SYSCD   = :pSYSCD
+			   AND  CR_ITEMID  = :pBASEITEM
+			   AND  CR_EDITCON = :pINACPTNO;
+
+		if (sqlca.sqlcode != 0) {
+			memset(szAcptNo, 0x00, sizeof(szAcptNo));
+		}
+
+    	NotUseDataTruncate (szAcptNo, 0x20);
+    }
+
+
+    if (strlen(szAcptNo) == 0) {
+		if (CMR1000_Make	(pSYSCD, szSYSGB, szPRCDATE, szEDITOR, szJOBCD, szTEAMCD, szAcptNo) != 0) {
+			fprintf(stderr, "신청번호 변경 채번 오류\n");
+			return (1);
+		}
+	}
+
+	sprintf(pACPTNO  , "%s", szAcptNo );
+	sprintf(pACPTDATE, "%s", szPRCDATE);
+	sprintf(pPRCDATE , "%s", szPRCDATE);
+	sprintf(pEDITOR  , "%s", szEDITOR );
+
+
+	/*-----------------------------------------------------------*/
+    /*	신청일련번호 채번                                        */
+    /*-----------------------------------------------------------*/
+    EXEC SQL
+    	SELECT  NVL(MAX(CR_SERNO), 0) + 1
+    	  INTO  :szSerNo
+    	  FROM  CMR1010
+    	 WHERE  CR_ACPTNO = :szAcptNo;
+
+
+	/*-----------------------------------------------------------*/
+    /*	TO-BE TABLE INSERT                                       */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		INSERT INTO CMR1010
+			( CR_ACPTNO
+			, CR_SERNO
+			, CR_SYSCD
+			, CR_SYSGB
+			, CR_JOBCD
+			, CR_PRCDATE
+			, CR_STATUS
+			, CR_QRYCD
+			, CR_RSRCCD
+			, CR_DSNCD
+			, CR_RSRCNAME
+			, CR_RSRCNAM2
+			, CR_SRCCHG
+			, CR_PRIORITY
+			, CR_EDITOR
+			, CR_PUTCODE
+			, CR_BASEPGM
+			, CR_BASEDSN
+			, CR_BASEITEM
+			, CR_ITEMID
+			, CR_EDITCON
+			)
+		VALUES
+			( :szAcptNo
+		    , :szSerNo
+		    , :pSYSCD
+		    , :szSYSGB
+		    , :szJOBCD
+		    , TO_DATE(:szPRCDATE, 'YYYYMMDDHH24MISS')
+		    , '9'
+		    , '03'
+		    , :szRSRCCD
+		    , LPAD(:szDSNCD , 7, '0')
+		    , :szRSRCNAME
+		    , :szRSRCNAME
+		    , '1'
+		    , '21'
+		    , :szEDITOR
+		    , '0000'
+		    , :szBASEPGM
+		    , :szBASEDSN
+		    , :szBaseItem
+		    , :pITEMID
+		    , :pINACPTNO
+			);
+
+	if (sqlca.sqlcode != 0) {
+		fprintf(stderr, "%d %s\n", sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+		szErrorCnt++;
+	}
+
+	return (0);
+
+}
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*        형상관리 테이블 CONVERSION 처리 M A I N                */
+/*                                                               */
+/*****************************************************************/
+int		main (int argc, char **argv, char** envp)
+{
+char	szITEMID              [dfItemID];
+char	szBASEITEM            [dfItemID];
+char	szRsrcName          [dfRsrcName];
+char	szACPTNO              [dfAcptNo];
+char	szSYSCD                [dfSysCD];
+char	szPaSYSCD              [dfSysCD];
+char	szCMD                      [256];
+int 	retval                          ;
+char	szRstACPTNO           [dfAcptNo];
+char	szRstACPTDATE             [14+1];
+char	szRstPRCDATE              [14+1];
+char	szRstEDITOR           [dfEditor];
+int 	nVer                            ;
+
+
+    if ( argc < 2 ) {
+        printf ("usage : %s <시스템코드> \n", argv[0]);
+        exit (0);
+	}
+
+	sprintf(szPaSYSCD, "%s", argv[1]);
+	NotUseDataTruncate (szPaSYSCD, 0x20);
+
+	gEnvp = envp;				         /*### gEnvp = 환경변수  */
+
+	/*-----------------------------------------------------------*/
+    /*   Signal Define			                                 */
+    /*-----------------------------------------------------------*/
+    DefineSignal ();
+
+ 	/*-----------------------------------------------------------*/
+    /*	 DB Server  Connect                                      */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE) {
+		fprintf(stderr, "DB CONNECTING ERROR \n");
+		exit (1);
+	}
+
+
+	Get_Sys_Date(szStartDate);
+	Get_Sys_Time(szStartTime);
+
+	szTotalCnt   = 0;
+	szSuccessCnt = 0;
+	szErrorCnt   = 0;
+
+ 	/*-----------------------------------------------------------*/
+    /*	 신청기록 작성 대상 목록                                 */
+    /*-----------------------------------------------------------*/
+	EXEC SQL
+		DECLARE CMR0021_LIST CURSOR FOR
+			SELECT  A.CR_ITEMID
+			      , B.CR_BASEITEM
+			      , A.CR_ACPTNO
+			      , B.CR_SYSCD
+      		      , B.CR_RSRCNAME
+   			  FROM  CMR0021 A
+   			      , CMR0020 B
+		     WHERE  CR_SYSCD = :szPaSYSCD
+		       AND  SUBSTR(A.CR_ACPTNO, 7) = '000000'
+		       AND  A.CR_ITEMID = B.CR_ITEMID
+		     ORDER  BY  B.CR_BASEITEM, DECODE(B.CR_ITEMID, B.CR_BASEITEM, 0, 1);
+
+	EXEC SQL OPEN CMR0021_LIST;
+    while (1) {
+		EXEC SQL FETCH CMR0021_LIST
+			INTO  :szITEMID
+				, :szBASEITEM
+				, :szACPTNO
+				, :szSYSCD
+				, :szRsrcName;
+
+		if (sqlca.sqlcode == 1403) break;
+
+		szTotalCnt++;
+
+		sprintf(szITEMID  , "%s", trunc_char(szITEMID  ));
+		sprintf(szBASEITEM, "%s", trunc_char(szBASEITEM));
+		sprintf(szACPTNO  , "%s", trunc_char(szACPTNO  ));
+		sprintf(szSYSCD   , "%s", trunc_char(szSYSCD   ));
+		sprintf(szRsrcName, "%s", trunc_char(szRsrcName));
+
+
+		if (CMR1010_Make(szACPTNO, szSYSCD, szITEMID, szBASEITEM, szRstACPTNO, szRstACPTDATE, szRstPRCDATE, szRstEDITOR) == 0) {
+			fprintf(stdout, "CMR0021 CK <%s> <%s> <%s> <%s> <%s> <%s> <%s>\n", szACPTNO, szSYSCD, szITEMID, szRstACPTNO, szRstACPTDATE, szRstPRCDATE, szRstEDITOR);
+			fflush (stdout);
+			
+			EXEC SQL
+				UPDATE  CMR0021
+				   SET  CR_ACPTNO   = :szRstACPTNO
+				   	  , CR_ACPTDATE = TO_DATE(:szRstACPTDATE, 'YYYYMMDDHH24MISS')
+				   	  , CR_PRCDATE  = TO_DATE(:szRstPRCDATE , 'YYYYMMDDHH24MISS')
+				   	  , CR_EDITOR   = :szRstEDITOR
+				 WHERE  CR_ACPTNO = :szACPTNO
+				   AND  CR_ITEMID = :szITEMID;
+
+			szSuccessCnt++;
+		}
+		else {
+			fprintf(stderr, "CMR1010 ERROR %s %s\n", szITEMID, szACPTNO);
+			szErrorCnt++;
+		}
+			EXEC SQL COMMIT;
+	}
+ 	EXEC SQL close CMR0021_LIST;
+
+	Get_Sys_Date(szEndDate);
+	Get_Sys_Time(szEndTime);
+
+	fprintf(stdout, "CMR0021 TOTAL : %06d   SUCCESS : %06d   ERROR : %06d [%s %s ~ %s %s] %d\n"
+				  , szTotalCnt, szSuccessCnt, szErrorCnt, szStartDate, szStartTime, szEndDate, szEndTime);
+
+
+	Get_Sys_Date(szStartDate);
+	Get_Sys_Time(szStartTime);
+
+	szTotalCnt   = 0;
+	szSuccessCnt = 0;
+	szErrorCnt   = 0;
+
+	EXEC SQL
+		DECLARE CMR0025_LIST CURSOR FOR
+			SELECT  A.CR_ITEMID
+			      , B.CR_BASEITEM
+			      , A.CR_ACPTNO
+			      , B.CR_SYSCD
+      		      , A.CR_VER
+   			  FROM  CMR0025 A
+   			      , CMR0020 B
+		     WHERE  CR_SYSCD = :szPaSYSCD
+		       AND  SUBSTR(A.CR_ACPTNO, 7) = '000000'
+		       AND  A.CR_ITEMID = B.CR_ITEMID
+		     ORDER  BY  B.CR_BASEITEM, DECODE(B.CR_ITEMID, B.CR_BASEITEM, 0, 1);
+
+	EXEC SQL OPEN CMR0025_LIST;
+    while (1) {
+		EXEC SQL FETCH CMR0025_LIST
+			INTO  :szITEMID
+				, :szBASEITEM
+				, :szACPTNO
+				, :szSYSCD 
+				, :nVer;
+
+		if (sqlca.sqlcode == 1403) break;
+
+		szTotalCnt++;
+
+		sprintf(szITEMID  , "%s", trunc_char(szITEMID  ));
+		sprintf(szBASEITEM, "%s", trunc_char(szBASEITEM));
+		sprintf(szACPTNO  , "%s", trunc_char(szACPTNO  ));
+		sprintf(szSYSCD   , "%s", trunc_char(szSYSCD   ));
+
+		EXEC SQL
+			SELECT  CR_ACPTNO
+			  INTO  :szACPTNO
+			  FROM  CMR0021
+			 WHERE  CR_ITEMID = :szITEMID
+			   AND  CR_VER    = :nVer;
+
+		NotUseDataTruncate (szACPTNO, 0x20);
+			   	
+		if (sqlca.sqlcode == 0) {
+			fprintf(stdout, "CMR0025 CK <%s> <%s> <%s> <%d>\n", szACPTNO, szSYSCD, szITEMID, nVer);
+			fflush (stdout);
+						
+			EXEC SQL
+				UPDATE  CMR0025
+				   SET  CR_ACPTNO = :szACPTNO
+				 WHERE  CR_ITEMID = :szITEMID
+			       AND  CR_VER    = :nVer;
+
+			szSuccessCnt++;
+		}
+		else {
+			fprintf(stderr, "CMR0021 ERROR %s %d\n", szITEMID, nVer);
+			szErrorCnt++;
+		}
+		EXEC SQL COMMIT;
+ 	}
+ 	EXEC SQL close CMR0025_LIST;
+
+	Get_Sys_Date(szEndDate);
+	Get_Sys_Time(szEndTime);
+
+	fprintf(stdout, "CMR0025 TOTAL : %06d   SUCCESS : %06d   ERROR : %06d [%s %s ~ %s %s] %d\n"
+				  , szTotalCnt, szSuccessCnt, szErrorCnt, szStartDate, szStartTime, szEndDate, szEndTime);
+
+
+	EXEC SQL COMMIT   WORK RELEASE;
+
+	exit(0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

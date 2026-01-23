@@ -1,0 +1,321 @@
+/*-----------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_filemake.pc                               │
+ ├──────┼───────────────────────┤
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2013. 04. 15                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   인   숙                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#define		dfMain	1
+
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+
+EXEC SQL INCLUDE SQLCA;
+
+
+/*---------------------------------------------------------------*/
+/*       INTERNAL  FUNCTION  DEFINE                              */
+/*---------------------------------------------------------------*/
+int 	ConnectDB();
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+/*---------------------------------------------------------------*/
+/*		전역변수 			                                     */
+/*---------------------------------------------------------------*/
+char   **gEnvp;			/*환경 변수    */
+char gszLogFile[50];	/*Log File Name*/
+char gszLogPath[100];	/*Log File Path*/
+char gszLogMsg[512];	/*Log Message  */
+char gszTempPath[100];	/*Temp Direcotry*/
+
+
+
+
+
+
+int		main (int argc, char **argv, char **envp)
+{
+	char	szAcptNo[21];
+	char	szSysCD[6];
+	char	szRsrcCD[128];
+	char	szDsnCD[8];
+	char	szRsrcName[512];
+	int		szSerNo;
+	char	szBaseNo[21];
+	char	szReqCD[3];
+	char	szSysGB[2];
+	char	szEditor[512];
+	char	szItemId[13];
+	char	szGbnCd[2];
+	char    pSysCD[6];
+	
+	char	szCommand[5000];
+	char    szDirPath[512];
+	char    szOutHome[512];
+	
+	int		nRet;
+	int		ncnt;
+	int     nLastVer;
+	
+	if (argc < 4) {
+        printf ("Usage : %s <syscd> <rsrccd> <outhomedir> \n", argv[0]);
+        exit (0);
+    }
+	
+	/*-----------------------------------------------------------*/
+	/* 로그 파일 Set	        	  		                     */
+	/*-----------------------------------------------------------*/
+	Get_Sys_Date(gszLogFile);
+	strcat(gszLogFile,".log");
+	strcpy(gszLogPath,"LogMessage/");	
+
+
+	memset(szSysCD    , 0x00, sizeof(szSysCD   ));
+	memset(szRsrcCD   , 0x00, sizeof(szRsrcCD   ));
+	memset(szOutHome  , 0x00, sizeof(szOutHome   ));	
+	sprintf(szSysCD   , "%s", argv[1]);    
+	sprintf(szRsrcCD  , "%s", argv[2]);      
+	sprintf(szOutHome , "%s", argv[3]);    
+
+    /*-----------------------------------------------------------*/
+    /*   eCAMS  DB Server  Connect                               */
+    /*-----------------------------------------------------------*/
+	if (ConnectDB() == FALSE){
+		/*LOG*/sprintf(gszLogMsg,"FileMake DB Connect Error\n");
+	    eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+		exit(1);
+	}
+
+	/*LOG*/sprintf(gszLogMsg,"[%s] ecams_filemake 처리 시작 [%s] [%s]\n",szSysCD,szRsrcCD,szOutHome);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+	
+	
+	EXEC SQL  declare CHKDOC_CUR cursor for
+		SELECT	DISTINCT
+				A.CR_ITEMID,
+				A.CR_SYSCD,
+				A.CR_RSRCNAME,
+				A.CR_LSTVER,
+				B.CM_DIRPATH
+		FROM	CMM0036 C,CMM0070 B,CMR0020 A
+		WHERE	A.CR_SYSCD=DECODE(:szSysCD,'ALL',A.CR_SYSCD,:szSysCD)
+		  AND INSTR(DECODE(:szRsrcCD,'ALL',A.CR_RSRCCD,:szRsrcCD),A.CR_RSRCCD)>0
+		  AND A.CR_LSTVER>0
+		  AND A.CR_STATUS NOT IN ('C','9')
+		  AND A.CR_SYSCD=B.CM_SYSCD
+		  AND A.CR_DSNCD=B.CM_DSNCD
+		  AND A.CR_SYSCD=C.CM_SYSCD
+		  AND A.CR_RSRCCD=C.CM_RSRCCD
+		  AND SUBSTR(C.CM_INFO,12,1)='1';
+		
+			
+	EXEC SQL open  CHKDOC_CUR;
+
+
+    while (1) 
+	{
+		EXEC SQL fetch CHKDOC_CUR into  :szItemId, :pSysCD, :szRsrcName, :nLastVer, :szDirPath;
+
+		if (sqlca.sqlcode == 1403)	break;		
+		
+		if (sqlca.sqlcode != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] select cmr0020 error [%d] [%s]\n",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			exit(1);			
+		}
+		NotUseDataTruncate (szItemId     , 0x20);
+		NotUseDataTruncate (pSysCD     , 0x20);
+		NotUseDataTruncate (szRsrcName  , 0x20);
+		NotUseDataTruncate (szDirPath   , 0x20);
+		
+		sprintf(szOutName,"%s/%s/%s/%s",szOutHome,szSysCD,szDirPath,szRsrcName);
+		/*-------------------------------------------------------*/
+	    /*   파일의 존재여부 체크                                */
+	    /*-------------------------------------------------------*/
+		EXEC SQL
+			SELECT  COUNT(*)
+			  INTO  :nCnt
+			  FROM  CMR0025
+			 WHERE  CR_ITEMID = :szItemId
+			   AND  CR_VER    = :nLastVer;
+
+		if (sqlca.sqlcode != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] select cmr0025 error [%s][%s][%s][%d][%d] [%s]\n",
+			       szSysCD,szRsrcName,szItemId,nLastVer,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			continue;
+		}
+
+		if (nCnt == 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] select cmr0025 not found [%s][%s][%s][%d][%d] [%s]\n",
+			       szSysCD,szRsrcName,szItemId,nLastVer,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			continue;
+		}
+		nRet = Right_Char_Check(szOutName, '/');
+		if (nRet > 0) {
+			sprintf(szDirName, "%s", left_char(szOutName, nRet-1));
+			if (access(szDirName,F_OK) != 0) {
+				memset(szCmd,0x00,sizeof(szCmd));
+				sprintf(szCmd,"mkdir -p \"%s\" ", szDirName);
+				retval = system(szCmd)/256;
+				if (retval != 0) {
+					Local_Dir_Make(szDirName);
+				}
+			}
+		}
+
+		strcat(szOutName,".gz");
+	    fp = fopen(szOutName,"wb");
+
+	    /*-------------------------------------------------------*/
+	    /*		BLOB READ 하여 FILE 에 WRITE                     */
+	    /*-------------------------------------------------------*/
+	    strcpy( action_str, "Fetching BLOB Locator...");
+		EXEC SQL WHENEVER SQLERROR DO o_error(action_str, szOutName);
+	    EXEC SQL EXECUTE
+		    BEGIN
+				SELECT  CR_FILE
+				  INTO  blob_it.my_blob
+				  FROM  CMR0025
+				 WHERE  CR_ITEMID = :szItemID
+				   AND  CR_VER    = :szVersion;
+
+		       #ifndef V8
+		       :total := blob_it.get_blob_len;
+		       #else
+		       :total := DBMS_LOB.GETLENGTH(blob_it.my_blob);
+		       #endif
+		    END;
+		END-EXEC;	    
+
+	    amount = READ_SIZE;
+	    offset = 1;
+	    done   = 0;
+	    strcpy( action_str, "Reading From BLOB ...");
+
+	    while (!done) {
+		    EXEC SQL EXECUTE
+		        BEGIN
+		            #ifndef V8
+		            blob_it.read_blob(:amount,:offset,:my_vr);
+		            #else
+		            DBMS_LOB.READ(blob_it.my_blob,:amount,:offset,:my_vr);
+		            #endif
+		        END;
+			END-EXEC;
+
+			if (sqlca.sqlcode != 0) {
+				/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] select cmr0025 filemake error [%s][%s][%s][%d][%d] [%s]\n",
+				       szSysCD,szRsrcName,szItemId,nLastVer,sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				break;
+			}
+
+	        offset += amount;
+	    
+	        if (offset > total)
+	            done = 1;
+
+	        fwrite(my_vr.arr,(size_t)amount,(size_t)1,fp);
+	    }
+	    fclose(fp);
+	    
+	    if (FileSizeInf(szOutName) <= 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] filesize zero [%s][%s][%s]\n",
+			       szSysCD,szRsrcName,szOutName);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			continue;
+		}
+		else {
+			memset(szCmd,0x00,sizeof(szCmd));
+			sprintf(szCmd,"chmod 777 \"%s\"\n", szOutName);
+			retval = system(szCmd)/256;
+			
+			sprintf(szCmd,"ecams_zip -d \"%s\"\n", szOutName);
+			retval = system(szCmd)/256;
+			
+			sprintf(szCmd,"chmod 777 \"%s\"\n", szOutNameBack);
+			retval = system(szCmd)/256;
+			retval = 0;
+			remove(szOutName);
+			if (access(szOutNameBack, F_OK) != 0) {
+				/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] makefile not found [%s][%s][%s]\n",
+				       szSysCD,szRsrcName,szOutNameBack);
+				eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+				continue;
+			}
+		}
+  }
+  EXEC SQL WHENEVER NOT FOUND CONTINUE;
+  EXEC SQL CLOSE CHKDOC_CUR;
+		
+	/*LOG*/sprintf(gszLogMsg,"[%s] ecams_filemake 처리 종료\n",szAcptNo);
+	eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);		
+	exit(0);
+		
+}
+
+int 	ConnectDB()
+{
+EXEC SQL BEGIN DECLARE SECTION;
+	VARCHAR       user_id      [20];    /* Host User ID          */
+	VARCHAR       passwd       [20];    /* Host PassWord         */
+EXEC SQL END DECLARE SECTION;
+char	gConnStr		       [50];
+int		rtycnt;
+int		conflag;
+
+
+	memset(gConnStr, 0x00, sizeof(gConnStr));
+	sprintf(gConnStr, "%s/%s@%s", getenv("DBUSER"), getenv("DBPASS"), getenv("DBCONN"));
+
+	rtycnt = 0;
+	conflag = 0;
+	
+	do
+	{
+		EXEC SQL CONNECT :gConnStr;
+		if (sqlca.sqlcode != 0) {
+			/*LOG*/sprintf(gszLogMsg,"[ecams_filemake] ConnectDB() ERROR [%d][%s]", sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc);
+			eCAMS_Log(gszLogPath,gszLogFile,gszLogMsg);
+			conflag = 0;
+			rtycnt++;
+		}
+		
+		else
+		{
+			conflag = 1;
+			break;
+		}
+		sleep(2);
+	} while(rtycnt < 10);
+	
+	if (conflag == 0){
+		return FALSE;
+	}
+	else{
+		return TRUE;
+	}
+}
+
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/

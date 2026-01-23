@@ -1,0 +1,5 @@
+cd libaes   ;make all; make -f Makefile32; cd ..
+cd libenc   ;make all; make -f Makefile32; cd ..
+cd libsock  ;make all; make -f Makefile32; cd ..
+cd libtar   ;make all; make -f Makefile32; cd ..
+cd libzip   ;make all; make -f Makefile32; cd ..

@@ -1,0 +1,91 @@
+# ┌──────┬───────────────────────┐
+# │ 프로그램명 │ Makefile                                     │
+# ├──────┼───────────────────────┤
+# │ 기      능 │ Oracle Pro*C Compile Script                  │
+# ├──────┼───────────────────────┤
+# │ 작  성  일 │ 2012. 10. 02                                 │
+# ├──────┼───────────────────────┤
+# │ 작  성  자 │ 최   병   남                                 │
+# └──────┴───────────────────────┘
+
+include $(ORACLE_HOME)/precomp/lib/env_precomp.mk
+
+eCAMS_HOME=$(APPHOMES)
+BINPATH = $(eCAMS_HOME)/bin
+LIBPATH = $(eCAMS_HOME)/lib
+INCLIB  = $(eCAMS_HOME)/inc
+
+OBJECT_MODE=64
+
+COMMAR    = $(LIBPATH)/libecams_comm.a
+ACCTAR    = $(LIBPATH)/libecams_acct.a
+ACCOMPAR  = $(LIBPATH)/libecams_accomp.a
+COMMLIB   = -L$(LIBPATH) -lecams_comm
+ACCTLIB   = -L$(LIBPATH) -lecams_acct
+ACCOMPLIB = -L$(LIBPATH) -lecams_accomp
+ORALIB    = -L$(LIBHOME) $(PROLDLIBS)
+
+PROC=$(ORACLE_HOME)/bin/proc
+USERID=$(DBUSER)/$(DBPASS)@$(DBCONN)
+#PROCFLAG= SQLCHECK=full userid=$(DBUSER) include=$(INCLIB) unsafe_null=yes mode=oracle dbms=v8 CODE=ANSI_C define=_H_SYSRAS define=_H_BUF define=__64BIT__ define=_IBM_C define=_LONG_LONG define=_LONG_LONG_LTOH
+
+PROCFLAG= SQLCHECK=full userid=$(USERID) include=$(INCLIB) unsafe_null=yes mode=oracle dbms=v8 CODE=ANSI_C define=_H_SYSRAS define=_H_BUF define=__64BIT__ define=_IBM_C define=_LONG_LONG define=_LONG_LONG_LTOH
+#PROCFLAG= SQLCHECK=full userid=$(USERID) include=$(INCLIB) unsafe_null=yes mode=oracle dbms=v8 define=_H_SYSRAS define=_H_BUF define=__64BIT__ define=_IBM_C define=_LONG_LONG 
+CFLAGS= -DLOGGING -g
+LIBHOME=$(ORACLE_HOME)/lib/
+LD_LIBRARY_PATH=$(ORACLE_HOME)/lib:/usr/lib/
+
+
+#CC=cc -D_FILE_OFFSET_BITS=64  -D MULTIARG -D TEST_MODE -D ON_LINE -D LOGGING -I$(INCLIB) 
+CC=cc -q64 -O2 -D MULTIARG -D TEST_MODE -D ON_LINE -D LOGGING -I$(INCLIB)
+CCcurses=cc
+AR=ar -X64 rc
+
+
+LIBcurses=-lcurses -ltermcap
+
+all:							\
+		ecams_tabconv       	\
+		ecams_tabconv_main     	\
+		ecams_tabupdt		\
+		FileRead_asiscmr0025	\
+		FileRead_cmr0025_ver_dr	\
+		FileRead_asiscmr0027 	\
+		ecams_effsend			\
+		ecams_effsend_sub		\
+		ecams_effsend1			\
+		ecams_effsend1_sub		\
+		ecams_drsend			\
+		ecams_drsend_sub		\
+
+
+
+.SUFFIXES: .pc .c .o
+
+clean:
+	rm -f *.o core
+
+.c.o:
+	$(CC)  $(CFLAGS) -c $*.c -o $@ -I$(INCLIB)
+
+
+# ############################################################
+# ORACLE PRO*C
+# ############################################################
+ecams_tabconv         	\
+ecams_tabconv_main    	\
+ecams_tabupdt		\
+FileRead_asiscmr0025	\
+FileRead_cmr0025_ver_dr	\
+FileRead_asiscmr0027	\
+ecams_effsend			\
+ecams_effsend_sub		\
+ecams_effsend1			\
+ecams_effsend1_sub		\
+ecams_drsend			\
+ecams_drsend_sub		\
+:
+	$(PROC) $(PROCFLAG) iname=$@.pc oname=$@.c
+	$(CC) $@.c $(COMMLIB) $(ACCTLIB) $(ORALIB) -o $@
+	rm $@.c $@.lis
+	mv $@ $(BINPATH)

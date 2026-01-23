@@ -1,0 +1,135 @@
+/*--------------------------------------------------------------
+ ┌──────┬───────────────────────┐
+ │ 프로그램명 │ ecams_clragentlog.pc                         │
+ ├──────┼───────────────────────┤
+ │ 기      능 │ eCAMS 업무서버의 Agent Log Clear             │
+ ├──────┼───────────────────────┤
+ │ 작  성  일 │ 2011. 08. 12                                 │
+ ├──────┼───────────────────────┤
+ │ 작  성  자 │ 최   병   남                                 │
+ └──────┴───────────────────────┘
+-----------------------------------------------------------------*/
+
+#define		dfMain		1
+
+/*---------------------------------------------------------------*/
+/*     Header files                                              */
+/*---------------------------------------------------------------*/
+#include	<ecamsapi.h>
+#include 	<ecams_util.h>
+
+EXEC SQL INCLUDE "ecams_acct.h";
+
+
+
+/*---------------------------------------------------------------*/
+/*       USER  PROCEDURE  DEFINE                                 */
+/*---------------------------------------------------------------*/
+
+
+
+/*---------------------------------------------------------------*/
+/*		USER WORK DEFINE                                         */
+/*---------------------------------------------------------------*/
+
+
+
+
+
+/*****************************************************************/
+/*                                                               */
+/*		eCAMS 업무서버의 Agent Log Clear  처리   M A I N         */
+/*                                                               */
+/*****************************************************************/
+int		main(int argc, char **argv, char **envp)
+{
+char	**gEnvp;
+CMD_INFO	CmdInfo;
+char	szSysCD                [dfSysCD];
+char	szSvrIP                [dfSvrIP];
+int		szPortNo                        ;
+char	szSysOS                [dfSysOS];
+char	szSvrCD                [dfSvrCD];
+int 	szSvrSeq                        ;
+char	szAgentDir               [dfDir];
+char	szSysDate                  [8+1];
+int 	Del_ju_gi                       ;
+
+
+	if (argc != 2) {
+		fprintf (stderr, "Usage : %s <Del_ju_gi> \n", argv[0]);
+		exit (1);
+	}
+	Del_ju_gi = atoi(argv[1]);
+
+	gEnvp = envp;
+
+	if	(ConnectDB() == FALSE)
+		exit(1);
+
+	EXEC SQL DECLARE svrinfo_cur CURSOR for
+		SELECT  DISTINCT
+		        CM_SYSCD
+		      , CM_SVRIP
+		      , CM_SVRCD
+		      , CM_SEQNO
+		      , CM_PORTNO
+		      , CM_SYSOS
+		      , CM_DIR
+		      , TO_CHAR(SYSDATE,'YYYYMMDD')
+		  FROM  CMM0031
+		 WHERE  CM_SYSOS = '01'
+		   AND	CM_CLOSEDT IS NULL
+		 ORDER BY CM_SVRIP, CM_PORTNO;
+
+	EXEC SQL open svrinfo_cur;
+	while (1) {
+		EXEC SQL fetch svrinfo_cur
+			INTO  :szSysCD
+				, :szSvrIP
+				, :szSvrCD
+				, :szSvrSeq
+				, :szPortNo
+				, :szSysOS
+				, :szAgentDir
+				, :szSysDate;
+
+		if (sqlca.sqlcode == 1403) break;
+
+		NotUseDataTruncate(szSysCD   , 0x20);
+		NotUseDataTruncate(szSvrIP   , 0x20);
+		NotUseDataTruncate(szSvrCD   , 0x20);
+		NotUseDataTruncate(szSysOS   , 0x20);
+		NotUseDataTruncate(szAgentDir, 0x20);
+		NotUseDataTruncate(szSysDate , 0x20);
+
+		/*-------------------------------------------------------*/
+		/*	소켓 버퍼사이즈 SET                                  */
+		/*-------------------------------------------------------*/
+		if (Server_Buff_Size	(szSysCD, szSvrCD, szSvrSeq) == FALSE) {
+		    fprintf(stderr, "Server 소켓버퍼사이즈 정보 오류 [%s] [%s] [%d]\n", szSysCD, szSvrCD, szSvrSeq);
+		    exit (3);
+		}
+
+		CmdInfo.nPort = szPortNo;
+		strcpy(CmdInfo.szServerIP, szSvrIP);
+		strcpy(CmdInfo.szRstCond , "9999");
+		if (strlen(szAgentDir) > 5) {
+			strcpy(CmdInfo.szJobGub,"S");
+			sprintf(CmdInfo.szCommand, "find %s/AgentLog/* -prune -a -type f -a -mtime +%d -exec rm -rf {} \\;", szAgentDir, Del_ju_gi);
+	  		Server_Cmd_JOB(&CmdInfo);
+		}
+		
+		if (strcmp(CmdInfo.szRstCond,"0000") != 0) {
+			printf("로그파일 삭제실패 IP[%s] Command[%s] RstCond[%s]\n", CmdInfo.szServerIP,CmdInfo.szCommand, CmdInfo.szRstCond);
+		}
+	}
+	EXEC SQL close svrinfo_cur;
+
+	exit(0);
+}
+
+
+/*---------------------------------------------------------------*/
+/*             E N D    O F    P R O G R A M                     */
+/*---------------------------------------------------------------*/
