@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="fileinfo" >	
+	<resultMap id="getFileList_Result" type="app.ecams.file.model.FileInfo">
+		<result property="itemid" column="cr_itemid" jdbcType="VARCHAR"/>
+		<result property="rsrcname" column="cr_rsrcname" jdbcType="VARCHAR"/>		
+		<result property="lstver" column="cr_lstver" jdbcType="INTEGER"/>
+		<result property="editor" column="cr_editor" jdbcType="VARCHAR"/>
+		<result property="editorName" column="editorname" jdbcType="VARCHAR"/>
+		<result property="lstUser" column="cr_lstusr" jdbcType="VARCHAR"/> 
+		<result property="lstUserName" column="lstusrname" jdbcType="VARCHAR"/>
+		<result property="lastdate" column="lastdate" jdbcType="VARCHAR"/>
+		<result property="dirpath" column="dirpath" jdbcType="VARCHAR"/>
+		<result property="status" column="cr_status" jdbcType="VARCHAR"/>
+		<result property="statusName" column="sta" jdbcType="VARCHAR"/>
+		<result property="md5sum" column="cr_md5sum" jdbcType="VARCHAR"/>
+		<result column="cr_rsrccd" property="resourceType" jdbcType="VARCHAR"/>
+		<result column="jawon" property="resourceTypeName" jdbcType="VARCHAR"/>
+		<result column="cr_jobcd" property="jobcd" jdbcType="VARCHAR"/>
+		<result column="cm_jobname" property="jobName" jdbcType="VARCHAR"/>
+		<result column="cm_syscd" property="cmSyscd" jdbcType="VARCHAR"/>
+		<result column="cm_sysmsg" property="cmSysmsg" jdbcType="VARCHAR"/>
+		<result property="tstver" column="cr_tstver" jdbcType="INTEGER"/>
+		<result property="tstmd5sum" column="cr_tstmd5" jdbcType="VARCHAR"/>
+		<result property="cm_info" column="cm_info"/>
+		<result property="cmPrjname" column="cm_prjname"/>
+		<result property="viewver" column="cr_viewver"/>
+	</resultMap>
+	<resultMap id="getExecModList_Result" type="app.ecams.file.model.FileInfo">
+		<result property="cmSyscd" column="cr_syscd"/>
+		<result property="resourceType" column="cr_rsrccd"/>
+		<result property="rsrcname" column="cr_rsrcname"/>
+		<result property="jobcd" column="cr_jobcd"/>
+		<result property="lstver" column="cr_lstver"/>
+		<result property="itemid" column="cr_itemid"/>
+		<result property="dirpath" column="cm_dirpath"/>
+		<result property="resourceTypeName" column="jawon"/>
+		<result property="cm_info" column="CM_INFO"/>
+	</resultMap>
+	<resultMap id="getFileData_Result" type="app.ecams.file.model.FileInfo">
+		<result property="filebyte" column="cr_file" jdbcType="BLOB"/>
+	</resultMap>
+	
+	<resultMap id="getStatus_Result" type="hashmap">
+		<result property="cr_status" column="cr_status"/>
+		<result property="cr_editor" column="cr_editor"/>
+		<result property="cr_nomodify" column="cr_nomodify"/>
+		<result property="cm_codename" column="cm_codename"/>
+		<result property="cm_info" column="cm_info"/>
+		<result property="cm_username" column="cm_username"/>
+		<result property="cr_isrid" column="cr_isrid"/>
+	</resultMap>
+	
+	<select id="getLastFileVer" parameterType="string" resultType="String">
+		SELECT	MAX(cr_ver) AS lstver
+		FROM	CMR0025
+		WHERE	cr_itemid = #{itemid}
+	</select>
+	
+	<!-- and a.cr_acptno = b.cr_acptno -->
+	<select id="getFileData" parameterType="hashmap" resultMap="getFileData_Result">
+		select cr_file
+		  from cmr0025 a, cmr0021 b
+		 where a.cr_itemid = #{itemid}
+		   and a.cr_ver = b.cr_version
+		   and a.cr_itemid = b.cr_itemid
+		   and substr(a.cr_acptno,5,2) in ('07','16')
+		   and b.cr_aftviewver = #{lstver}
+		   and rownum=1
+	</select>
+		
+	<select id="getFileTstData" parameterType="java.lang.String" resultMap="getFileData_Result">
+		select b.cr_file
+		from cmr0020 a, cmr0026 b
+		where a.cr_itemid = #{id}
+		and a.cr_itemid = b.cr_itemid
+		and a.cr_tstver != 0
+		and a.cr_lstver = b.cr_basever
+		and a.cr_tstver = b.cr_ver	
+	</select>
+	
+	<select id="getLastFileData" parameterType="hashmap" resultMap="getFileData_Result">
+		select b.cr_file
+		from cmr0020 a, cmr0025 b, cmr0021 c
+		where a.cr_itemid = #{CR_ITEMID}
+		and a.cr_itemid = b.cr_itemid
+		and (c.cr_aftviewver = #{CR_VER} or to_char(c.cr_version) = #{CR_VER})
+		and b.cr_itemid = c.cr_itemid
+		and b.cr_acptno = c.cr_acptno
+		and b.cr_ver = c.cr_version
+		and rownum = 1
+	</select>
+
+	<select id="getPrevFileData" parameterType="hashmap" resultMap="getFileData_Result">
+		select b.cr_file
+		from cmr0020 a, cmr0026 b
+		where a.cr_itemid = #{CR_ITEMID}
+		and a.cr_itemid = b.cr_itemid
+		and b.cr_ver = #{CR_VER}
+	    and b.cr_basever = #{CR_BEFVER}
+	</select>
+	
+	<insert id="insertCmr0020" parameterType="hashmap">
+        insert into cmr0020 (CR_ITEMID,CR_SYSCD,CR_DSNCD,CR_RSRCNAME,
+							 CR_RSRCCD,CR_JOBCD,CR_LANGCD,CR_STATUS,CR_CREATOR,CR_STORY,
+							 CR_OPENDATE,CR_LASTDATE,CR_LSTVER,CR_EDITOR,CR_NOMODIFY,
+							 CR_PGMTYPE, CR_LSTUSR, CR_LSTDAT,CR_TESTVER,CR_TESTSTA,CR_REALVER,CR_REALSTA
+							,CR_ISRID
+							 )
+		values (lpad(ITEMID_SEQ.NEXTVAL,12,'0'),#{CR_SYSCD},#{CR_DSNCD},#{CR_RSRCNAME},CHGRSRC(#{CR_SYSCD},#{CR_RSRCNAME},#{CR_RSRCCD}),
+				#{CR_JOBCD},#{CR_LANGCD},'3',#{CR_CREATOR},nvl(#{CR_STORY},'일괄등록'),sysdate,sysdate,
+				0,#{CR_EDITOR},'0',#{CR_PGMTYPE}, #{CR_LSTUSR}, sysdate,'0','0',0,'0'
+				<choose>
+					<when test="CR_ISRID != null">
+				 		,#{CR_ISRID}
+					</when>
+					<otherwise>
+						,''
+					</otherwise>
+				</choose>
+				)
+	</insert>
+	
+	<insert id="insertCmr0023" parameterType="hashmap">
+        insert into cmr0023 (CR_ITEMID,CR_JOBCD,CR_EDITOR,CR_LASTDT,CR_SYSCD)
+		values (#{CR_ITEMID},#{CR_JOBCD},#{CR_EDITOR},sysdate,#{CR_SYSCD})
+	</insert>	
+	
+	<insert id="insertFileData" parameterType="hashmap">
+		insert into cmr0027 (CR_ACPTNO,CR_ITEMID,CR_FILE,CR_VER,CR_FILESIZE,CR_FILEDATE,CR_MD5SUM)
+		values (#{CR_ACPTNO},#{CR_ITEMID},#{CR_FILE,jdbcType=BLOB},#{CR_VER},#{CR_FILESIZE},#{CR_FILEDATE},#{CR_MD5SUM})
+	</insert>
+	
+	<select id="getcmr0027" parameterType="hashmap" resultType="hashmap">
+		select *
+		from cmm0027
+		where cr_itemid = #{CR_ITEMID}
+	</select>
+	
+	<select id="getFileList" parameterType="hashmap" resultMap="getFileList_Result">
+		select  a.cr_itemid,a.cr_rsrcname,a.cr_lstver, a.cr_editor, 
+		        (select cm_username from cmm0040 where cm_userid=a.cr_editor) as editorname,
+		        to_char(a.cr_lastdate,'yyyy/mm/dd/hh24/mi/ss') as lastdate, a.cr_status, 
+		        nvl(g.cm_dirpath,'/') as dirpath, l.cm_jobname,
+		        i.cm_codename sta, a.cr_rsrccd, e.cm_codename jawon, a.cr_jobcd,
+		        a.cr_lstusr,
+		        (select cm_username from cmm0040 where cm_userid=nvl(a.cr_lstusr,a.cr_editor)) as lstusrname, 
+		        d.cr_md5sum, a.cr_tstver cr_tstver, '' cr_tstmd5, c.cm_syscd, c.cm_sysmsg, j.cm_info, c.cm_prjname, a.cr_isrid,
+		        a.cr_viewver
+		from cmm0036 j,cmm0070 g,cmm0020 i,cmm0102 l,cmr0025 d,
+			 cmm0020 e,cmm0030 c,cmm0038 f,cmr0020 a, cmm0031 h
+		where a.cr_itemid=d.cr_itemid(+)
+		<if test="syscd != null" >
+			and a.cr_syscd=#{syscd}
+		</if>
+<!-- 	<if test="userid != null"> -->
+<!--		    and a.cr_jobcd in (select cm_jobcd from cmm0044 where cm_syscd = a.cr_syscd and cm_userid = #{userid})-->
+<!--    </if>-->
+		<if test="acptno != null" >
+			and a.cr_itemid in (select cr_itemid from cmr1010
+			                     where instr(#{acptno},cr_acptno)>0)
+		</if>
+		<if test="itemid != null" >
+			and a.cr_itemid = #{itemid}
+		</if>
+		<if test="filename != null" >
+			and a.cr_rsrcname = #{filename}
+		</if>
+		<if test="filepath != null" >
+			and g.cm_dirpath = h.cm_volpath||decode(substr(c.cm_sysinfo,16,1),'1','/'||l.cm_deptcd,'')|| decode(#{filepath}, '/', '', #{filepath})
+		</if>
+		<if test="dirpath != null">
+			and g.cm_dirpath like h.cm_volpath||decode(substr(c.cm_sysinfo,16,1),'1','/'||l.cm_deptcd,'')|| decode(#{dirpath}, '/', '', #{dirpath}) ||'%'
+		</if>
+		and a.cr_lstver=d.cr_ver(+)
+		and a.cr_syscd=g.cm_syscd 
+		and	a.cr_dsncd=g.cm_dsncd 
+		and	a.cr_syscd=j.cm_syscd 
+		and a.cr_syscd=c.cm_syscd
+		and j.cm_syscd=a.cr_syscd
+		and j.cm_closedt is null
+		and a.cr_syscd=f.cm_syscd
+        and a.cr_rsrccd = f.cm_rsrccd
+		and f.cm_rsrccd=j.cm_rsrccd
+		and f.cm_svrcd=c.cm_dirbase
+		and f.cm_svrcd=h.cm_svrcd
+        and f.cm_seqno=h.cm_seqno
+        and c.cm_syscd= h.cm_syscd
+		and h.cm_closedt is null
+        and h.cm_svrcd = c.cm_dirbase
+		<if test="rsrclist != null"> 
+			and a.cr_rsrccd in 
+			<foreach item="item" index="index" collection="rsrclist" open="(" separator="," close=")">
+				#{item}
+			</foreach>
+		</if>
+		and e.cm_macode='JAWON' 
+		and	a.cr_rsrccd=e.cm_micode 
+		<if test="jawon != null">
+			and e.cm_codename = #{jawon}
+		</if>
+		and i.cm_macode='CMR0020' 
+		and	a.cr_status=i.cm_micode 
+		and a.cr_jobcd=l.cm_jobcd
+		<if test="jobcd != null">
+			and a.cr_jobcd=#{jobcd}
+		</if>
+		and substr(j.cm_info,58,1)='1'
+		and j.cm_rsrccd not in ( select cm_samersrc from cmm0037
+								 where  cm_syscd = j.cm_syscd
+								 and    cm_samersrc is not null )
+	</select>
+	
+	<select id="getAllFileList" parameterType="String" resultMap="getExecModList_Result">
+		select a.cr_rsrccd,a.cr_rsrcname,a.cr_jobcd,a.cr_lstver,a.cr_itemid, 
+		       a.cr_syscd, b.cm_dirpath,e.CM_CODENAME as jawon,d.CM_INFO   
+	   	  from cmm0070 b,cmr0020 a,cmm0036 d,cmm0020 e  
+	   	 where a.cr_itemid = #{id}
+	   	   and a.cr_syscd=b.cm_syscd and a.cr_dsncd=b.cm_dsncd    
+	   	   and a.cr_syscd=d.cm_syscd and a.cr_rsrccd=d.cm_rsrccd  
+		   and e.cm_macode='JAWON' and e.cm_micode=a.cr_rsrccd
+	</select>
+	
+	<select id="getExecModList" parameterType="String" resultMap="getExecModList_Result">
+		select a.cr_rsrccd,a.cr_rsrcname,a.cr_jobcd,a.cr_lstver,a.cr_itemid, 
+		       a.cr_syscd, b.cm_dirpath,e.CM_CODENAME as jawon,d.CM_INFO
+	   	  from cmm0070 b,cmr0020 a,cmd0011 c,cmm0036 d,cmm0020 e 
+	   	 where c.cd_itemid = #{id}                                      
+	   	   and c.cd_prcitem=a.cr_itemid                           
+	   	   and a.cr_syscd=b.cm_syscd and a.cr_dsncd=b.cm_dsncd    
+	   	   and a.cr_syscd=d.cm_syscd and a.cr_rsrccd=d.cm_rsrccd  
+		   and e.cm_macode='JAWON' and e.cm_micode=a.cr_rsrccd
+	</select>
+	
+	<select id="getNewFileList" parameterType="hashmap" resultMap="getFileList_Result">
+		select *
+		from (select row_number()over(order by cr_rsrcname,nvl(g.cm_dirpath,'/') desc) as num,
+				     a.cr_itemid,a.cr_rsrcname,a.cr_lstver, a.cr_editor, 
+				     (select cm_username from cmm0040 where cm_userid=a.cr_editor) as editorname,
+				     to_char(a.cr_lastdate,'yyyy/mm/dd/hh24/mi/ss') as lastdate, a.cr_status, 
+				     nvl(g.cm_dirpath,'/') as dirpath, l.cm_jobname,
+				     i.cm_codename sta, a.cr_rsrccd, e.cm_codename jawon, a.cr_jobcd,
+				     a.cr_lstusr,
+				     (select cm_username from cmm0040 where cm_userid=nvl(a.cr_lstusr,a.cr_editor)) as lstusrname, 
+				     d.cr_md5sum, a.cr_tstver cr_tstver, '' cr_tstmd5, c.cm_syscd, c.cm_sysmsg, j.cm_info, c.cm_prjname,
+		        	 a.cr_viewver
+				from cmm0036 j,cmm0070 g,cmm0020 i,cmm0102 l,cmr0025 d,
+					 cmm0020 e,cmm0030 c,cmr0020 a
+				where a.cr_syscd=#{syscd}
+				<if test="userid != null">
+					and a.cr_jobcd in (select cm_jobcd from cmm0044 where cm_syscd = a.cr_syscd and cm_userid = #{userid})
+				</if>
+				<if test="jobcd != null">
+					and a.cr_jobcd=#{jobcd}
+				</if>
+				and a.cr_status != '9'
+				and a.cr_itemid=d.cr_itemid(+)
+				and a.cr_lstver=d.cr_ver(+)
+				and a.cr_syscd=g.cm_syscd 
+				and	a.cr_dsncd=g.cm_dsncd 
+				and	a.cr_syscd=j.cm_syscd 
+				and a.cr_rsrccd=j.cm_rsrccd
+				and a.cr_syscd=c.cm_syscd
+				and j.cm_syscd=a.cr_syscd 
+				and e.cm_macode='JAWON' 
+				and	a.cr_rsrccd=e.cm_micode 
+				and i.cm_macode='CMR0020' 
+				and	a.cr_status=i.cm_micode 
+				and a.cr_jobcd=l.cm_jobcd
+				and substr(j.cm_info,58,1)='1'
+				and j.cm_rsrccd not in ( select cm_samersrc from cmm0037
+										 where  cm_syscd = j.cm_syscd
+										 and    cm_samersrc is not null )
+		)
+		where num between #{start} and #{end}
+	</select>
+	
+	<select id="getFileListCount" parameterType="hashmap" resultType="int">
+		select  count(a.cr_itemid)
+		from cmm0036 j,cmm0070 g,cmm0020 i,cmm0102 l,cmr0025 d,
+			 cmm0020 e,cmm0030 c,cmr0020 a
+		where a.cr_syscd=#{syscd}
+		<if test="userid != null">
+			and a.cr_jobcd in (select cm_jobcd from cmm0044 where cm_syscd = a.cr_syscd and cm_userid = #{userid})
+		</if>
+		<if test="jobcd != null">
+			and a.cr_jobcd=#{jobcd}
+		</if>
+		and a.cr_status != '9'
+		and a.cr_itemid=d.cr_itemid(+)
+		and a.cr_lstver=d.cr_ver(+)
+		and a.cr_syscd=g.cm_syscd 
+		and	a.cr_dsncd=g.cm_dsncd 
+		and	a.cr_syscd=j.cm_syscd 
+		and a.cr_syscd=c.cm_syscd
+		and j.cm_syscd=a.cr_syscd 
+		and j.cm_rsrccd=a.cr_rsrccd
+		and e.cm_macode='JAWON' 
+		and	a.cr_rsrccd=e.cm_micode
+		and i.cm_macode='CMR0020' 
+		and	a.cr_status=i.cm_micode 
+		and a.cr_jobcd=l.cm_jobcd
+		and substr(j.cm_info,58,1)='1'
+		and j.cm_rsrccd not in ( select cm_samersrc from cmm0037
+								 where  cm_syscd = j.cm_syscd
+								 and    cm_samersrc is not null )
+	</select>	
+	
+	<select id="getFileInfo" parameterType="String" resultType="hashmap">
+		select * from cmr0020, cmm0036
+		where cr_syscd = cm_syscd and cr_rsrccd = cm_rsrccd and cr_itemid=#{id}
+	</select>
+	
+	<select id="getFileInfo_noitemid" parameterType="hashmap" resultType="String">
+		select cr_itemid from cmr0020
+		where cr_syscd = #{cr_syscd}
+		and cr_dsncd = #{cr_dsncd}
+		and upper(cr_rsrcname) = #{cr_rsrcname}
+	</select>
+	
+	<select id="getFind_Itemid" parameterType="hashmap" resultType="String">
+		select a.cr_itemid 
+		  from cmm0070 b, cmr0020 a
+		 where a.cr_syscd = #{syscd}
+		   and a.cr_rsrccd = #{rsrccd}
+		   and upper(a.cr_rsrcname) = upper(#{rsrcname})
+		   <if test="dirpath != null">
+		       and upper(b.cm_dirpath) = upper(#{dirpath})
+		   </if>
+		   and a.cr_syscd = b.cm_syscd
+		   and a.cr_dsncd = b.cm_dsncd
+	</select>
+	
+	<delete id="delete_cmr0025" parameterType="String">
+		delete cmr0025 where cr_itemid = #{item}
+		<if test="ver != null">
+			and cr_ver = #{ver}
+		</if>
+	</delete>
+	
+	<delete id="delete_cmr0021" parameterType="String">
+		delete cmr0021 where cr_itemid = #{item}
+		<if test="ver != null">
+			and cr_ver = #{ver}
+		</if>
+	</delete>
+	
+	<delete id="delete_cmr1010" parameterType="String">
+		delete cmr1010 where cr_itemid = #{item}
+	</delete>
+		
+	<delete id="delete_cmr0022" parameterType="String">
+		delete cmr0022 where cr_itemid = #{item}
+	</delete>
+	
+	<delete id="delete_cmr0020" parameterType="String">
+		delete cmr0020 where cr_itemid = #{item}
+	</delete>
+	
+	<select id="getNextItemID" resultType="String">
+		select to_number(nvl(max(cr_itemid),to_char(SYSDATE,'yyyymm')||'000000')) + 1 as max 
+  		from cmr0020
+  		where substr(cr_itemid,1,6)=to_char(SYSDATE,'yyyymm')
+	</select>
+	
+	<select id="getStatus" parameterType="hashmap" resultMap="getStatus_Result">
+		select a.cr_status,a.cr_editor,a.cr_nomodify,b.cm_codename,c.cm_info,d.cm_username, a.cr_isrid
+		from cmr0020 a,cmm0020 b,cmm0036 c,cmm0040 d
+		where a.cr_itemid = #{itemid}
+		and b.cm_macode='CMR0020' and b.cm_micode=a.cr_status
+		and a.cr_syscd=c.cm_syscd and a.cr_rsrccd=c.cm_rsrccd
+		and a.cr_editor=d.cm_userid
+		<if test="checkin != null">
+			and (substr(c.cm_info,12,1)='1'	or substr(c.cm_info,2,1)='1')
+		</if>
+	</select>
+
+	<update id="updateStatus" parameterType="hashmap">
+		update cmr0020
+		set CR_STATUS = #{SET_CR_STATUS},
+		    CR_EDITOR = #{SET_CR_EDITOR}
+		<if test="SET_CR_ISRID != null" >
+		    ,CR_ISRID = #{SET_CR_ISRID}
+		</if>
+		<if test="SET_CR_SYSDATE != null" >
+			,CR_LASTDATE=SYSDATE
+		</if>
+		
+		<if test="SET_CR_CKOUTUSER != null" >
+			,CR_CKOUTUSER=#{SET_CR_CKOUTUSER}
+		</if>
+		<if test="SET_CR_CKOUTACPT != null" >
+			,CR_CKOUTACPT=#{SET_CR_CKOUTACPT}
+		</if>
+
+	   	<if test="SET_CR_EDITVER != null" >
+			,CR_EDITVER=#{SET_CR_EDITVER}
+		</if>
+		
+		where CR_ITEMID = #{PARAM_CR_ITEMID}
+	</update>
+	
+	<select id="getFileInfo_MasterUnique" parameterType="hashmap" resultType="String" >
+		select MASTER_UNIQUE(#{cr_syscd}, #{cr_rsrccd}, #{cr_jobcd}, #{dirpath}, #{cr_rsrcname})
+		from dual
+	</select>
+</mapper>

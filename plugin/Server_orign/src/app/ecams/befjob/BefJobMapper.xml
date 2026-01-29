@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="befjobinfo">	
+	<resultMap id="getBefJobList_detail_Result" type="app.ecams.befjob.model.BefJobInfo">
+		<result property="crAcptno" column="cr_acptno" jdbcType="VARCHAR"/>
+		<result property="crAcptdate" column="acptdate" jdbcType="VARCHAR"/>
+		<result property="crSysmsg" column="cm_sysmsg" jdbcType="VARCHAR"/>
+		<result property="crUsername" column="cm_username" jdbcType="VARCHAR"/>
+		<result property="crStatus" column="status" jdbcType="VARCHAR"/>
+		<result property="crSayu" column="cr_sayu" jdbcType="VARCHAR"/>
+	</resultMap>
+	
+	<select id="getBefJobList_detail" resultMap="getBefJobList_detail_Result" parameterType="String">
+	   select to_char(a.cr_acptdate,'yyyy/mm/dd hh24:mi') acptdate,
+		      a.cr_acptno,a.cr_sayu,b.cm_sysmsg,c.cm_username,d.cm_codename status
+		 from cmm0020 d,cmm0040 c,cmm0030 b,cmr1000 a
+		where a.cr_qrycd='04' 
+		  and a.cr_prcdate is null
+		  and a.cr_syscd=b.cm_syscd
+		  and a.cr_editor=c.cm_userid
+		  and d.cm_macode='CMR1000' 
+		  and d.cm_micode=a.cr_status
+		order by a.cr_acptdate desc
+	</select>
+	
+</mapper>

@@ -1,0 +1,18 @@
+<project name="eCAMS_Server" default="compile" basedir=".">
+
+	<!-- Default property definitions -->
+	<property name="proto.name"  value="ProtoEcams.proto"/>
+	<property name="proto.dir" value="${basedir}\src\app\core\proto"/>
+	<property name="src.dir" value="${basedir}\src"/>
+
+	<!-- Make New Classes from Source Depends prepare -->
+	<target name="compile">
+		<echo message="Compiling proto file"/>
+		<exec executable="protoc.exe" dir="${proto.dir}">
+			<arg line="'--java_out=${src.dir}'"/>
+			<arg line="'${proto.name}'" />
+		</exec>
+		<echo message="Make New Classes from Source Complete"/>
+	</target>
+	
+</project>

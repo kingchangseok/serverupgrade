@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="job" >
+	
+	<resultMap id="getJobInfo_ResultMap" type="app.ecams.job.model.Job" >
+	    <result column="cm_jobcd" property="jobcd" jdbcType="VARCHAR" />
+	    <result column="cm_jobname" property="jobName" jdbcType="VARCHAR" />
+	    <result column="cm_deptcd" property="deptcd"/>
+	</resultMap>
+	<resultMap id="getJobCheck_ResultMap" type="app.ecams.job.model.Job" >
+	    <result column="cm_jobcd" property="jobcd" jdbcType="VARCHAR" />
+	</resultMap>
+	
+	
+	<select id="getJobListInfo" parameterType="String" resultMap="getJobInfo_ResultMap">
+		select a.cm_jobcd, b.cm_jobname , nvl(b.cm_deptcd,a.cm_jobcd) cm_deptcd
+		from cmm0034 a, cmm0102 b
+		where a.cm_syscd=#{id}
+		and a.CM_CLOSEDT is null
+		and a.cm_jobcd = b.cm_jobcd
+		order by b.cm_jobname, a.cm_jobcd
+	</select>
+	
+	<select id="getJobInfo" parameterType="hashmap" resultMap="getJobInfo_ResultMap">
+		select a.cm_jobcd, b.cm_jobname , nvl(b.cm_deptcd,a.cm_jobcd) cm_deptcd
+		  from cmm0044 a, cmm0102 b
+		 where a.cm_syscd=#{CM_SYSCD}
+		   and a.cm_userid=#{CM_USERID}
+		   and a.CM_CLOSEDT is null
+		   and a.cm_jobcd = b.cm_jobcd
+		 order by b.cm_jobname, a.cm_jobcd
+	</select>
+	<!-- 
+		select a.cm_jobcd, b.cm_jobname , nvl(b.cm_deptcd,a.cm_jobcd) cm_deptcd
+		from cmm0034 a, cmm0102 b
+		where a.cm_syscd=#{CM_SYSCD}
+		and a.CM_CLOSEDT is null
+		and a.cm_jobcd = b.cm_jobcd
+		order by b.cm_jobname, a.cm_jobcd
+	 -->
+	<select id="getJobCheck" parameterType="hashmap" resultMap="getJobCheck_ResultMap">
+		select cr_jobcd 
+		from cmr0020 a
+		where a.cr_syscd=#{CM_SYSCD}
+		<if test="ITEMIDLIST != null"> 
+			and a.cr_itemid in
+			<foreach item="item" index="index" collection="ITEMIDLIST" open="(" separator="," close=")">
+				#{item}
+			</foreach>
+		</if>		
+		and not exists (select 'X'
+					 from cmm0044
+					where cm_userid=#{CM_USERID}
+					and cm_syscd = a.cr_syscd
+					and cm_jobcd = a.cr_jobcd
+					)
+	</select>
+	
+	<select id="getMyJobCheck" parameterType="hashmap" resultType="String">
+		select cm_jobcd
+		  from cmm0044
+		 where cm_userid= #{CM_USERID}
+		   and cm_syscd = #{CM_SYSCD}
+		   and cm_jobcd = #{CM_JOBCD}
+	</select>
+	
+	<select id="getJobCd" parameterType="hashmap" resultType="String">
+		select a.cm_jobcd
+		from cmm0034 a,cmm0044 b
+		where a.cm_syscd=#{syscd}
+		  and a.cm_syscd=b.cm_syscd
+		  and a.cm_closedt is null
+		  and b.cm_userid=#{userid}
+		  and rownum=1
+	</select>
+	
+</mapper>

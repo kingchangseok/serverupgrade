@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+Ant-Version: Apache Ant 1.5.4 
+Created-By: 1.4.2-b28 (Sun Microsystems Inc.)
+Package-Provided-By: H.Zeller <H.Zeller@acm.org>
+License: GPL
+Main-Class: henplus.HenPlus
+

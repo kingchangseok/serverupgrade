@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE configuration 
+		PUBLIC "-//ibatis.apache.org//DTD Config 3.0//EN"
+		"http://ibatis.apache.org/dtd/ibatis-3-config.dtd">  
+<configuration>
+	<settings>
+		<setting name="cacheEnabled" value="true"/> <!-- mapper에 설정된 캐시를 전역적으로 사용할지말지에 대한여부-->
+		<setting name="lazyLoadingEnabled" value="true"/> <!--늦은로딩을 사용할지에 대한여부. 사용하지않는다면 즉시로딩-->
+		<setting name="multipleResultSetsEnabled" value="true"/><!--한개의 구문에서 여러개의 ResultSet을 허용할지여부-->
+		<setting name="defaultExecutorType" value="SIMPLE"/><!--디폴트실행자설정. (SIMPLE특별히 하는것 없음, REUSE는 PreparedStatement를 재사용, BATCH 구문을 재사용하고 수정을 배치처리)-->
+		<setting name="useColumnLabel" value="true"/><!--컬럼명대신 컬럼라벨을 사용(정상적인지 확인필요)-->
+		<setting name="useGeneratedKeys" value="false"/><!--생성키에대한 jdbc지원허용. true로 설정하면 생성키를 강제로 생성-->
+		<setting name="defaultStatementTimeout" value="25000"/><!--응답을 얼마나 기다릴제 판단 타임아웃-->
+	</settings>
+	
+	<mappers>
+		<mapper resource="app/ecams/srjob/SRJobMapper.xml"/>
+		<mapper resource="app/ecams/syncwith/SyncWithMapper.xml"/>
+		<mapper resource="app/ecams/commoncode/CommonCodeMapper.xml"/>
+		<mapper resource="app/ecams/anal/AnalMapper.xml"/>
+		<mapper resource="app/ecams/befjob/BefJobMapper.xml"/>
+		<mapper resource="app/ecams/file/FileMapper.xml"/>
+		<mapper resource="app/ecams/path/PathMapper.xml"/>
+		<mapper resource="app/ecams/lang/LangMapper.xml"/>
+		<mapper resource="app/ecams/history/HistoryMapper.xml"/>
+		<mapper resource="app/ecams/job/JobMapper.xml"/>
+		<mapper resource="app/ecams/request/autoseq/AutoSeqMapper.xml"/>
+		<mapper resource="app/ecams/request/checkin/CheckInMapper.xml"/>
+		<mapper resource="app/ecams/request/checkinreal/CheckInRealMapper.xml"/>
+		<mapper resource="app/ecams/request/checkout/CheckOutMapper.xml"/>
+		<mapper resource="app/ecams/request/checkoutcnl/CheckOutCnlMapper.xml"/>
+		<mapper resource="app/ecams/request/checkincnl/CheckInCnlMapper.xml"/>
+		<mapper resource="app/ecams/request/confirm/ConfirmMapper.xml"/>
+		<mapper resource="app/ecams/request/RequestMapper.xml"/>
+		<mapper resource="app/ecams/resourcetype/ResourceTypeMapper.xml"/>
+		<mapper resource="app/ecams/system/SystemInfoMapper.xml"/>
+		<mapper resource="app/ecams/user/UserInfoMapper.xml"/>
+		<mapper resource="app/ecams/request/lastcheckout/LastCheckOutMapper.xml"/>
+	</mappers>
+	
+</configuration>

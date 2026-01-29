@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="checkinreal" >	
+	<insert id="CheckInReal_InsertCmr1010" parameterType="java.lang.String">
+		insert into cmr1010 
+		(CR_ACPTNO,CR_SERNO,CR_SYSCD,CR_SYSGB,CR_JOBCD,
+		 CR_STATUS,CR_QRYCD,CR_RSRCCD,CR_DSNCD,CR_DSNCD2,CR_RSRCNAME,
+		 CR_RSRCNAM2,CR_SRCCHG,CR_SRCCMP,CR_PRIORITY,CR_APLYDATE,
+		 CR_VERSION,CR_BEFVER,CR_CONFNO,CR_EDITOR,CR_BASENO,CR_BASEITEM,
+		 CR_ITEMID,CR_EDITCON,CR_ANALYN,CR_PGMTYPE)
+		 (select a.cr_acptno,
+		 (select max(cr_serno) from cmr1010 where cr_acptno=#{CR_ACPTNO})+rownum,
+		 a.cr_syscd,a.CR_SYSGB,b.CR_JOBCD,'0',b.CR_QRYCD,b.CR_RSRCCD,
+		 b.CR_DSNCD,b.CR_DSNCD2,b.CR_RSRCNAME,b.CR_RSRCNAM2,b.CR_SRCCHG,
+		 'Y',b.CR_PRIORITY,a.CR_APLYDATE,b.CR_VERSION,b.CR_BEFVER,
+		 a.CR_CONFNO,a.CR_EDITOR,a.CR_BASENO,a.CR_BASEITEM,b.CR_ITEMID,
+		 a.CR_EDITCON,a.CR_ANALYN,a.CR_PGMTYPE 
+		 from cmr1010 a,cmr1010 b
+		 where a.cr_acptno=#{CR_ACPTNO} and a.cr_itemid=a.cr_baseitem
+		 and b.cr_acptno=a.cr_confno
+		 and a.cr_itemid=b.cr_baseitem and a.cr_itemid!=b.cr_itemid
+		 and a.cr_status!='3')  
+	</insert>
+	
+	<select id="CheckInReal_item_List_check" parameterType="java.lang.String" resultType="hashmap">
+ 		select cr_itemid 
+		  from cmr1010 where cr_acptno=#{CR_ACPTNO}
+		 group by cr_itemid
+		having count(*)>1 
+	</select>
+	
+	<delete id="CheckInReal_item_delete" parameterType="hashmap">
+ 		delete cmr1010 where cr_acptno=#{CR_ACPTNO}
+		   and cr_itemid=#{CR_ITEMID}
+		   and cr_serno not in (select cr_serno from cmr1010
+		                         where cr_acptno=#{CR_ACPTNO}
+		                           and cr_itemid=#{CR_ITEMID}
+		                           and rownum != 1)
+	</delete>
+	
+	<select id="CheckInReal_list_check" parameterType="java.lang.String" resultType="hashmap">
+		select cr_acptno,cr_confno,cr_serno,cr_qrycd,cr_itemid,cr_baseitem
+		from cmr1010 
+		where cr_acptno= #{acptNo}
+	</select>
+	
+	<select id="CheckInReal_SelectDBIO" parameterType="java.lang.String" resultType="hashmap">
+		select cr_confno,cr_rsrcname,cr_baseitem,cr_aplydate
+		from cmr1010 
+		where cr_acptno=#{acptNo} 
+		and cr_rsrccd in ('12','46','47','48','49','50')
+	</select>
+	
+	<update id="updateCmr1010" statementType="CALLABLE" parameterType="hashmap">
+<!-- 		update cmr1010 set -->
+<!-- 			cr_confno= #{acptno} -->
+<!-- 		where cr_confno is null   -->
+<!-- 		and cr_itemid=#{itemid}  -->
+<!-- 		and cr_acptno=#{confno} -->
+		{call RELATNO_UPDT(#{acptno})}
+	</update>
+	
+	<insert id="insertCmr1030" parameterType="hashmap">
+		insert into cmr1030
+		(CR_ACPTNO,CR_BEFACT) values (#{CR_ACPTNO}, #{CR_BEFACT})
+	</insert>
+	
+	<delete id="deleteCmr1016" parameterType="hashmap">
+		delete cmr1016 
+		where cr_acptno=#{acptno}
+	</delete>
+	
+	<insert id="insertCmr1016" parameterType="hashmap">
+		insert into cmr1016
+		(cr_acptno,cr_docguid,cr_docname)
+		values (#{}, #{}, #{})
+	</insert>
+	
+</mapper>

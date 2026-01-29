@@ -1,0 +1,77 @@
+<project name="eCAMS_Server" default="dist" basedir=".">
+
+	<!-- Default property definitions -->
+	<property name="app.name"  value="eCAMS_Server"/>
+	<property name="dist.dir" value="${basedir}/dist"/>
+	<property name="tmp.dir" value="${basedir}/tmp"/>
+	<property name="build.dir" value="${basedir}/bin"/>
+	<property name="lib.dir" value="${basedir}/lib"/>
+	<property name="src.dir" value="${basedir}/src"/>
+	<property name="shell.dir" value="${basedir}/shell"/>
+	
+	<property name="jar.name" value="eCAMS_Server.jar"/>
+	<property name="main.class" value="app.Ecams_Server"/>
+	<property name="author" value="azsoft"/>
+
+
+
+    <path id="jars">
+    	<fileset dir="${lib.dir}" includes="*.jar"/>
+    </path>
+
+    <pathconvert property="manifest-classpath" refid="jars" pathsep=" " dirsep="/">
+		<map from="${lib.dir}" to="../libs" />
+	</pathconvert>
+	
+	
+	<!-- ClassPath -->
+	<path id="classpath">
+		<fileset dir="${lib.dir}" includes="*.jar"/>
+	</path>
+
+	<!-- Make New Classes from Source Depends prepare -->
+	<target name="compile" depends="clear">
+		<echo message="Compiling source code"/>
+		<javac srcdir="${src.dir}" destdir="${build.dir}" debug="on" optimize="off" deprecation="on" encoding="utf-8">
+			<classpath refid="classpath"/>
+		</javac>
+		<echo message="Make New Classes from Source Complete"/>
+	</target>
+
+	<target name="gather" depends="compile">
+		<copy todir="${tmp.dir}/classes" failonerror="true" overwrite="true"/>
+		<copy todir="${tmp.dir}/lib" failonerror="true" overwrite="true"/>
+		
+	</target>
+	
+	
+	<target name="clear">
+		<delete>
+			<fileset dir="${dist.dir}"/>
+			<fileset dir="${tmp.dir}"/>
+			<fileset dir="${build.dir}"/>
+		</delete>
+	</target>
+
+	<target name="dist" depends="compile">
+		<jar destfile="${dist.dir}/bin/${jar.name}" basedir="${build.dir}" compress="true" filesetmanifest="mergewithoutmain">
+			<manifest>
+				<attribute name="Created-By" value="${author}"/>
+				<attribute name="Built-By" value="${author}"/>
+				<attribute name="Main-Class" value="${main.class}"/>
+				<attribute name="Class-Path" value=". "/>
+			</manifest>
+		</jar>
+		<copy todir="${dist.dir}/bin" failonerror="true" overwrite="true">
+			<fileset dir="${shell.dir}"/>
+		</copy>
+		<copy todir="${dist.dir}/lib" failonerror="true" overwrite="true">
+			<fileset dir="${lib.dir}"/>
+		</copy>
+		<copy todir="${dist.dir}/conf" failonerror="true" overwrite="true">
+			<fileset dir="${src.dir}">
+			    <include name="**/*.xml"/>
+			</fileset>
+		</copy>
+	</target>	
+</project>

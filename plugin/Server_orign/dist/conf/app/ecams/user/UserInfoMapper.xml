@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="userinfo" >
+	<resultMap id="getUserInfo_ResultMap" type="app.ecams.user.model.UserInfo" >  
+		<result column="cm_userid" property="cm_userid"/>
+		<result column="cm_username" property="cm_username"/>
+		<result column="cm_cpasswd" property="cm_cpasswd"/>
+		<result column="cm_logindt" property="cm_logindt"/>
+		<result column="cm_ercount" property="cm_ercount"/>
+		<result column="cm_admin" property="cm_admin"/>
+		<result column="cm_status" property="cm_status"/>
+		<result column="cm_active" property="cm_active"/>
+		<result column="cm_manid" property="cm_manid"/>
+		<result column="cm_deptseq" property="cm_deptseq"/>
+		<result column="cm_project" property="cm_project"/>
+		<result column="cm_project" property="teamcd"/>
+		<result column="teamname" property="teamname"/>	
+		<result column="cm_duty" property="cm_duty"/>
+		<result column="cm_position" property="cm_position"/>
+	</resultMap>
+<!-- 
+	<resultMap id="getUserlist_ResultMap" type="hashmap" >  
+		<result column="cm_userid" property="cm_userid"/>
+	</resultMap>
+ -->
+	<select id="getUserInfo" resultMap="getUserInfo_ResultMap" parameterType="String" >
+		select  a.cm_userid, a.cm_username, nvl(a.cm_cpasswd,a.cm_dumypw) cm_cpasswd, a.cm_logindt,
+				a.cm_ercount, a.cm_admin, a.cm_status, a.cm_active,
+				a.cm_manid,a.cm_deptseq, a.cm_project,a.cm_project,
+				c.cm_deptname teamname, a.cm_duty, a.cm_position
+		from cmm0100 c,cmm0040 a
+		where a.cm_userid= #{id}
+		and a.cm_project=c.cm_deptcd
+	</select>
+	
+	<select id="getUserList" resultType="hashmap" parameterType="String" >
+		select b.cm_userid 
+        from   cmm0040 a,cmm0040 b
+        where  a.cm_userid = #{id}
+        and    b.cm_project = a.cm_project 
+        and    b.cm_active = '1'
+	</select>
+	
+	<select id="getUsername" resultType="String" parameterType="String" >
+		select  cm_username
+		from cmm0040
+		where cm_userid = #{id}
+	</select>
+
+	<select id="getMasterPasswd" resultType="String">
+		select CM_PASSWD
+		from cmm0010
+		where cm_stno='ECAMS'
+	</select>
+
+	<select id="chkUserId" parameterType="String" resultType="java.lang.Integer" >
+		select count(*) from CMM0040
+		where CM_USERID = #{id}
+	</select>
+	
+	<update id="setPasswd" parameterType="hashmap">
+		UPDATE CMM0040
+		   SET CM_CPASSWD = #{SET_PASSWD},
+		       CM_CHANGEDT = SYSDATE,
+		       CM_ERCOUNT = 0
+		 WHERE CM_USERID = #{SET_ID}
+	</update>
+	
+	<select id="getPwdnum" resultType="java.lang.Integer" >
+		SELECT CM_PWDNUM
+		  FROM CMM0010 
+		 WHERE CM_STNO='ECAMS'
+	</select>
+	
+	<select id="cntCmm0041" resultType="int" parameterType="String">
+		SELECT COUNT(*)
+         FROM CMM0041
+        WHERE CM_CHANGDT IN (SELECT MIN(CM_CHANGDT) FROM CMM0041 where cm_userid = #{userId})
+	</select>
+	
+	<update id="updtPassWd_Cmm0041" parameterType="String">
+		UPDATE CMM0041 
+	   	   SET CPASSWD = #{curPwd}, 
+			   CHANGEDT = SYSDATE
+	 	WHERE CM_CHANGDT IN (SELECT MIN(CM_CHANGDT) FROM CMM0041 WHERE CM_USERID = #{userId})
+	</update>
+			
+	<insert id="insertPassWd_Cmm0041" parameterType="String">
+		INSERT  INTO CMM0041 (CM_USERID, CM_CHANGDT, CM_PASSWD) 
+		VALUES  (#{userId}, SYSDATE, #{curPwd})
+	</insert>
+	
+</mapper>

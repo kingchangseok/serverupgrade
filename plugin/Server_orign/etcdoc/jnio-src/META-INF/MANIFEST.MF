@@ -1,0 +1,10 @@
+Manifest-Version: 1.0
+Implementation-Vendor: Adam Martin
+Implementation-Title: JNIO - Simple Java NIO Server Library
+Implementation-Version: 1.0
+Implementation-Vendor-Id: amartin at ncsoft.com
+Class-Path: log4j-1.2.8.jar
+Implementation-URL: http://javagamesfactory.org
+Extension-Name: jnio
+Main-Class: org.javagamesfactory.nioservers.SimpleServerDemo
+

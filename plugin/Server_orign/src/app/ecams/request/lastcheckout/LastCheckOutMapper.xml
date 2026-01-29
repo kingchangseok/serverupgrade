@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="lastcheckout">
+	<resultMap id="getLastVersion_Result" type="app.ecams.request.lastcheckout.model.LastCheckOutInfo">
+		<result property="crPrcdate" column="cr_prcdate" jdbcType="VARCHAR"/>
+		<result property="crRsrcname" column="cr_rsrcname" jdbcType="VARCHAR"/>
+		<result property="cmUsername" column="cm_username" jdbcType="VARCHAR"/>
+		<result property="BaseVer" column="cr_basever" jdbcType="VARCHAR"/>
+		<result property="editCon" column="cr_editcon"/>
+		<result property="acptno" column="cr_acptno"/>
+	</resultMap>
+	<!-- <result property="Vergbn" column="cd" jdbcType="VARCHAR"/>  -->
+	
+	<!-- select c.cm_username,d.cr_ver cr_basever,d.cr_acptno,b.cr_rsrcname, 
+		       to_char(b.cr_prcdate,'yyyy/mm/dd hh24:mi:ss') cr_prcdate, b.cr_editcon   
+		  from cmr0020 e,cmm0040 c,cmr1010 b,cmr1000 a,cmr0025 d 
+		 where d.cr_itemid= #{id}
+		   and d.cr_itemid=e.cr_itemid   
+		   and d.cr_acptno=b.cr_acptno 
+		   and d.cr_itemid=b.cr_itemid 
+		   and b.cr_acptno=a.cr_acptno 
+		   and a.cr_editor=c.cm_userid 
+		order by b.cr_prcdate desc  -->
+	<select id="select_lastver" parameterType="String" resultMap="getLastVersion_Result">
+		select c.cm_username,f.cr_aftviewver cr_basever,d.cr_acptno,b.cr_rsrcname, 
+		       to_char(b.cr_prcdate,'yyyy/mm/dd hh24:mi:ss') cr_prcdate, b.cr_editcon   
+		  from cmr0020 e,cmm0040 c,cmr1010 b,cmr1000 a,cmr0025 d, cmr0021 f
+		 where d.cr_itemid= #{id}
+		   and d.cr_itemid=e.cr_itemid   
+		   and d.cr_acptno=b.cr_acptno 
+		   and d.cr_itemid=b.cr_itemid 
+		   and b.cr_acptno=a.cr_acptno 
+		   and a.cr_editor=c.cm_userid 
+		   and d.cr_itemid = f.cr_itemid
+		   and d.cr_acptno = f.cr_acptno
+		   and d.cr_ver = f.cr_version
+		order by b.cr_prcdate desc 
+	</select>
+	
+</mapper>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="commoncode" >
+	
+	<resultMap id="getCode_ResultMap" type="app.ecams.commoncode.model.CommonCode" >
+	    <result column="cm_macode" property="macode" jdbcType="VARCHAR" />
+	    <result column="cm_micode" property="micode" jdbcType="VARCHAR" />
+	    <result column="cm_codename" property="codename" jdbcType="VARCHAR" />
+	</resultMap>
+	 
+	<select id="getCode" parameterType="hashmap" resultMap="getCode_ResultMap">
+		select cm_macode,cm_micode,cm_codename from CMM0020
+		where CM_CLOSEDT is null
+		and CM_MACODE= #{macode}
+		and CM_micode != '****'
+		<if test="micode != null" >		
+			and CM_MICODE= #{micode}
+		</if>		
+        order by cm_micode
+	</select>
+	
+</mapper>

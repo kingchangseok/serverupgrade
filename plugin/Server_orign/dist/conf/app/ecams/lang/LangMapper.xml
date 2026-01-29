@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="lang" >
+	
+	<resultMap id="getLangInfo_ResultMap" type="app.ecams.lang.model.Lang" >
+	    <result column="cm_micode" property="micode" jdbcType="VARCHAR" />
+	    <result column="cm_codename" property="codename" jdbcType="VARCHAR" />
+	</resultMap>
+	
+	<select id="getLangInfo" parameterType="hashmap" resultMap="getLangInfo_ResultMap">
+		select a.cm_micode,a.cm_codename from cmm0020 a,cmm0032 b 
+		where b.cm_syscd=#{CM_SYSCD} and b.cm_rsrccd=#{CM_RSRCCD}
+		and a.cm_macode='LANGUAGE'
+		and a.cm_micode=b.cm_langcd
+	</select>
+	
+	<select id="getRsrcCD" parameterType="String" resultType="String">
+		select a.cm_rsrccd
+		from cmm0036 a
+		where a.cm_syscd=#{syscd}
+		  and a.cm_closedt is null
+		  and substr(a.cm_info,58,1)='1'
+		  and rownum=1
+	</select>
+</mapper>

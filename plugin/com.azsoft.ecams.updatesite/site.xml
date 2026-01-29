@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<site>
+   <description name="eCAMS" url="eCAMS">
+      eCAMS
+   </description>
+   <feature url="features/com.azsoft.ecams.feature_1.0.1.jar" id="com.azsoft.ecams.feature" version="1.0.1">
+      <category name="eCAMS"/>
+   </feature>
+   <category-def name="eCAMS" label="형상관리"/>
+</site>

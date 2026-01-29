@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="checkin" >
+	<resultMap id="getSameRsrc_resultMap" type="app.ecams.request.checkin.model.CheckInfo">
+		<result property="samename" column="cm_samename"/>
+		<result property="samersrc" column="cm_samersrc"/>
+		<result property="basedir" column="cm_basedir"/>
+		<result property="samedir" column="cm_samedir"/>
+		<result property="basename" column="cm_basename"/>
+		<result property="cm_cmdyn" column="cm_cmdyn"/>
+		<result property="cm_info" column="cm_info"/>
+		<result property="rsrctypename" column="cm_codename"/>
+	</resultMap>
+	
+	<insert id="CheckIn_InsertCmr1010" parameterType="hashmap">
+		insert into cmr1010 
+		(CR_ACPTNO,CR_SERNO,CR_SYSCD,CR_SYSGB,CR_JOBCD,
+		 CR_STATUS,CR_QRYCD,CR_RSRCCD,CR_DSNCD,CR_DSNCD2,CR_RSRCNAME,
+		 CR_RSRCNAM2,CR_SRCCHG,CR_SRCCMP,CR_PRIORITY,CR_APLYDATE,
+		 CR_VERSION,CR_BEFVER,CR_CONFNO,CR_EDITOR,CR_BASENO,CR_BASEITEM,
+		 CR_ITEMID,CR_EDITCON,CR_ANALYN,CR_PGMTYPE)
+		 (select a.cr_acptno,
+		 (select max(cr_serno) from cmr1010 where cr_acptno=#{CR_ACPTNO})+rownum,
+		 a.cr_syscd,a.CR_SYSGB,b.CR_JOBCD,'0',b.CR_QRYCD,b.CR_RSRCCD,
+		 b.CR_DSNCD,b.CR_DSNCD2,b.CR_RSRCNAME,b.CR_RSRCNAM2,b.CR_SRCCHG,
+		 'Y',b.CR_PRIORITY,a.CR_APLYDATE,b.CR_VERSION,b.CR_BEFVER,
+		 a.CR_CONFNO,a.CR_EDITOR,a.CR_BASENO,a.CR_BASEITEM,b.CR_ITEMID,
+		 a.CR_EDITCON,a.CR_ANALYN,a.CR_PGMTYPE 
+		 from cmr1010 a,cmr1010 b
+		 where a.cr_acptno=#{CR_ACPTNO} and a.cr_itemid=a.cr_baseitem
+		 and b.cr_acptno=a.cr_confno
+		 and a.cr_itemid=b.cr_baseitem and a.cr_itemid!=b.cr_itemid
+		 and a.cr_status!='3')
+	</insert>
+	
+	<update id="updateCmr1010" statementType="CALLABLE" parameterType="hashmap">
+<!-- 		update cmr1010 set -->
+<!-- 			cr_confno= #{acptno} -->
+<!-- 		where cr_confno is null   -->
+<!-- 		and cr_itemid=#{itemid}  -->
+<!-- 		and cr_acptno=#{confno} -->
+		{call RELATNO_UPDT(#{acptno})}
+	</update>
+	
+	<select id="getSameRsrc" parameterType="hashmap" resultMap="getSameRsrc_resultMap">
+		select b.cm_samename,b.cm_samersrc,b.cm_basedir,       
+		       b.cm_samedir,b.cm_basename,b.cm_cmdyn,a.cm_info, c.cm_codename 
+		  from cmm0036 a,cmm0037 b, cmm0020 c                            
+		 where b.cm_syscd = #{syscd} and b.cm_rsrccd = #{rsrccd}                  
+		   and b.cm_factcd='04'                                
+		   and b.cm_syscd=a.cm_syscd                           
+		   and b.cm_samersrc=a.cm_rsrccd
+		   and c.cm_macode = 'JAWON'
+		   and c.cm_micode = b.cm_samersrc
+		   <!-- and substr(a.cm_info,58,1)='1'  -->
+	</select>
+	<!-- 이클립스사용인 Class만 로컬에서 가져올때 아래조건 추가
+	 and substr(a.cm_info,58,1)='1' -->
+	
+	<select id="getCmd0010Cnt" parameterType="hashmap" resultType="int">
+		select count(*) cnt 
+		  from cmd0010
+		 where cd_itemid=#{itemid}
+		   and cd_makeitem=#{makeitem}
+	</select>
+	
+	<select id="getNameChange" parameterType="hashmap" resultType="String">
+		SELECT NAMECHANGE(#{INSYSCD},#{INRSRCNAME},#{INSAMENAME},#{INDIRPATH},
+	   					  #{INBASEITEM},#{INACPTNO},#{INRSRCCD})
+	   	  FROM DUAL
+	</select>
+	
+	<select id="getSysCd" parameterType="String" resultType="String">
+		SELECT	cr_syscd
+		FROM	cmr0020
+		WHERE	cr_itemid   = #{itemid}
+	</select>
+    
+    <!--
+	<select id="selectFileInspectList" parameterType="String" resultType="HashMap">
+		SELECT A.CR_RSRCNAME,A.CR_SERNO,B.CR_MD5SUM
+		  FROM CMR0025 B,CMM0036 C,CMR1010 A       
+		 WHERE A.CR_ACPTNO=#{acptNo}
+		   AND A.CR_CONFNO=B.CR_ACPTNO  
+		   AND A.CR_ITEMID=B.CR_ITEMID 
+		   AND A.CR_SYSCD=C.CM_SYSCD  
+		   AND A.CR_RSRCCD=C.CM_RSRCCD  
+		   AND SUBSTR(C.CM_INFO,28,1)='1'
+		   AND INSTR(A.CR_RSRCNAME,'.')>0  
+		   AND EXISTS (SELECT 1 FROM CMM0010
+		                WHERE CM_STNO='ECAMS' 
+		                  AND INSTR(NVL(CM_SECUEXE,'XXX'),SUBSTR(A.CR_RSRCNAME,INSTR(A.CR_RSRCNAME,'.',-1)) || ',')>0)
+	</select>
+	
+	<update id="update_cmr1010_sparrowRst" parameterType="HashMap">
+		UPDATE CMR1010 
+      	   SET CR_SPARROWRST=#{CR_SPARROWRST},
+               CR_RISK1=#{CR_RISK1},
+               CR_RISK2=#{CR_RISK2},
+               CR_RISK3=#{CR_RISK3},
+               CR_RISK4=#{CR_RISK4},
+               CR_RISK5=#{CR_RISK5},
+               CR_SPARROWURL=#{CR_SPARROWURL}
+      	 WHERE CR_ACPTNO=#{CR_ACPTNO}
+      	   AND CR_SERNO=#{CR_SERNO}
+	</update>
+	-->
+</mapper>

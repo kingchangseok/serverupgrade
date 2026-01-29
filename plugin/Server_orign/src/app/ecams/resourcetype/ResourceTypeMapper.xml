@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="resourcetype" >
+	
+	<resultMap id="getRsrcInfo_ResultMap" type="app.ecams.resourcetype.model.ResourceType" >
+	    <result column="cm_micode" property="resourceType" jdbcType="VARCHAR" />
+	    <result column="cm_codename" property="resourceTypeName" jdbcType="VARCHAR" />
+	    <result column="cm_exename" property="resourceExeName" jdbcType="VARCHAR" />
+	    <result column="cm_info" property="resourceCmInfo" jdbcType="VARCHAR" />
+	</resultMap>
+	
+	<select id="getRsrcInfo" parameterType="java.lang.String" resultMap="getRsrcInfo_ResultMap">
+		select a.cm_micode,a.cm_codename,b.cm_exename,b.cm_info
+		 from CMM0020 a,cmm0036 b
+		where b.cm_syscd=#{id}
+		  and b.cm_closedt is null
+		  and substr(b.cm_info,58,1)='1'
+		  and a.CM_MACODE='JAWON'
+		  and a.CM_MICODE=b.cm_rsrccd
+        order by a.cm_micode
+	</select>
+	
+	<select id="getRsrcInfo_detail" parameterType="hashmap" resultType="hashmap">
+		select * from cmm0036 
+		where cm_syscd=#{CM_SYSCD}
+		and cm_rsrccd=#{CM_RSRCCD}
+		and CM_CLOSEDT is null
+	</select>
+	
+	<select id="getResourceName" parameterType="java.lang.String" resultMap="getRsrcInfo_ResultMap">
+		select cm_micode,cm_codename from CMM0020
+		where CM_CLOSEDT is null
+		and CM_MACODE='JAWON'
+		and CM_MICODE=#{id}
+	</select>
+	
+	<select id="getSameResoureceCode" parameterType="list" resultType="String">
+		select distinct cm_samersrc from cmm0037
+		where cm_syscd=#{list[0]}
+		and cm_rsrccd in 
+		<foreach item="item" index="index" collection="list[1]" open="(" separator="," close=")">
+			#{item}
+		</foreach>
+	</select>
+	
+	<select id="getInterLockResource" parameterType="list" resultType="int">
+		select count(*) cnt 
+		from cmm0036
+		where cm_syscd=#{list[0]}
+		and cm_rsrccd in 
+		<foreach item="item" index="index" collection="list[1]" open="(" separator="," close=")">
+			#{item}
+		</foreach>
+		and substr(cm_info,27,1)='1'
+	</select>
+	
+</mapper>

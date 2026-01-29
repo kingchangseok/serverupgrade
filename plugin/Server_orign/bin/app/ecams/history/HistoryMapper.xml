@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="historyinfo">	
+	<resultMap id="getHistoryList_detail_Result" type="app.ecams.history.model.HistoryInfo">
+		<result property="crAcptno" column="cr_acptno" jdbcType="VARCHAR"/>
+		<result property="crPrcdate" column="cr_prcdate" jdbcType="VARCHAR"/>
+		<result property="crRsrccd" column="cr_rsrccd" jdbcType="VARCHAR"/>
+		<result property="crEditcon" column="cr_editcon" jdbcType="VARCHAR"/>
+		<result property="crStatus" column="cr_status" jdbcType="VARCHAR"/>
+		<result property="cmUsername" column="cm_username" jdbcType="VARCHAR"/>
+		<result property="cmCodename" column="cm_codename" jdbcType="VARCHAR"/>
+		<result property="crQrycd" column="cr_qrycd" jdbcType="VARCHAR"/>
+		<result property="crAcptdate" column="cr_acptdate" jdbcType="VARCHAR"/>
+		<result property="crVersion" column="cr_version" jdbcType="VARCHAR"/>
+		<result property="joinver" column="joinver" jdbcType="VARCHAR"/>
+		<result property="ccSrid" column="cc_srid" jdbcType="VARCHAR"/>
+		<result property="ccTitle" column="cc_reqtitle" jdbcType="VARCHAR"/>
+	</resultMap>
+	
+	<!-- select   a.cr_acptno as cr_acptno, to_char(a.cr_prcdate,'yyyy/mm/dd hh24:mi:ss') as cr_prcdate, a.cr_rsrccd as cr_rsrccd, 
+		         to_char(a.cr_version) cr_version,
+				 nvl(a.cr_editcon,'-') as cr_editcon, a.cr_status as cr_status, b.cm_username as cm_username,
+				 c.cm_codename as cm_codename, d.cr_qrycd as cr_qrycd, to_char(d.cr_acptdate,'yyyy/mm/dd hh24:mi:ss') as cr_acptdate, 
+         		 e.cc_srid, e.cc_reqtitle
+		from 	 cmr1010 a,cmm0040 b,cmm0020 c,cmr1000 d, cmc0100 e
+		where 	 a.cr_itemid = #{id} 
+		and		 a.cr_acptno = d.cr_acptno 
+		and		 a.cr_editor = b.cm_userid 
+		and		 c.cm_macode = 'REQUEST' 
+		and 	 d.cr_qrycd  = c.cm_micode
+		and      d.cr_itsmid = e.cc_srid(+)
+		order by cr_acptdate desc
+		
+		2020.10.20
+		select   a.cr_acptno as cr_acptno, to_char(a.cr_prcdate,'yyyy/mm/dd hh24:mi:ss') as cr_prcdate, a.cr_rsrccd as cr_rsrccd, 
+		         f.cr_aftviewver cr_version, 
+				 nvl(a.cr_editcon,'-') as cr_editcon, a.cr_status as cr_status, b.cm_username as cm_username,
+				 c.cm_codename as cm_codename, d.cr_qrycd as cr_qrycd, to_char(d.cr_acptdate,'yyyy/mm/dd hh24:mi:ss') as cr_acptdate, 
+		 		 e.cc_srid, e.cc_reqtitle
+		from 	 cmr1010 a,cmm0040 b,cmm0020 c,cmr1000 d, cmc0100 e, cmr0021 f
+		where 	 a.cr_itemid = #{id} 
+		and		 a.cr_acptno = d.cr_acptno 
+		and		 a.cr_editor = b.cm_userid 
+		and		 c.cm_macode = 'REQUEST' 
+		and 	 d.cr_qrycd  = c.cm_micode
+		and      d.cr_itsmid = e.cc_srid(+)
+		and      a.cr_itemid = f.cr_itemid 
+		and      a.cr_acptno = f.cr_acptno
+		order by cr_acptdate desc
+		 -->
+	<select id="getHistoryList_detail" resultMap="getHistoryList_detail_Result" parameterType="String">
+		select   a.cr_acptno as cr_acptno, to_char(a.cr_prcdate,'yyyy/mm/dd hh24:mi:ss') as cr_prcdate, a.cr_rsrccd as cr_rsrccd, 
+		         nvl((select cr_aftviewver from cmr0021 where cr_itemid=a.cr_itemid and cr_acptno=a.cr_acptno),a.cr_befviewver) cr_version, 
+				 nvl(a.cr_editcon,'-') as cr_editcon, a.cr_status as cr_status, b.cm_username as cm_username, a.cr_version as joinver,
+				 c.cm_codename as cm_codename, d.cr_qrycd as cr_qrycd, to_char(d.cr_acptdate,'yyyy/mm/dd hh24:mi:ss') as cr_acptdate, 
+		 		 e.cc_srid, e.cc_reqtitle
+		from 	 cmr1010 a,cmm0040 b,cmm0020 c,cmr1000 d, cmc0100 e
+		where 	 a.cr_itemid = #{id} 
+		and		 a.cr_acptno = d.cr_acptno 
+		and		 a.cr_editor = b.cm_userid 
+		and		 c.cm_macode = 'REQUEST' 
+		and 	 d.cr_qrycd  = c.cm_micode
+		and		 a.cr_status = '9'
+		and		 d.cr_status = '9'
+		and      d.cr_itsmid = e.cc_srid(+)
+		order by cr_acptdate desc
+	</select>
+	
+</mapper>

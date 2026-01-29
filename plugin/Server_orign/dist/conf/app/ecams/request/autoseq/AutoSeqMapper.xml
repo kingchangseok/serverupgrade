@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="autoseq" >	
+	<resultMap id="getSeqNo_ResultMap" type="hashmap">
+	    <result column="cr_no" property="cr_no"/>
+	    <result column="lstdt" property="lstdt"/>
+	</resultMap>
+
+	<select id="getSeqNo" parameterType="java.lang.String" resultMap="getSeqNo_ResultMap">
+		select cr_no,to_char(cr_lastdt,'yyyy') as lstdt
+		from cmr0010 
+		where cr_gubun= #{id}
+	</select>
+	
+	<select id="getSeqNoElse" parameterType="java.lang.String" resultType="java.lang.String">
+<!-- 		SELECT AUTOSEQ_QRY(#{qrycd},#{wkC}) FROM DUAL -->
+		SELECT AUTOSEQ_QRY(#{qrycd},#{wkC}) FROM DUAL
+<!-- 			{call REQSEQ_MAKE(#{qrycd})} -->
+	</select>
+	
+	<update id="updateSeqNo" parameterType="hashmap">
+		update cmr0010
+		set cr_no= #{cr_no},
+			cr_lastdt=SYSDATE
+		where cr_gubun= #{qrycd}
+	</update>
+         
+	<insert id="insertSeqNo" parameterType="java.lang.String">
+	 	insert into cmr0010 (CR_GUBUN,CR_NO,CR_LASTDT,CR_LASTID)
+        values (#{id},'000001',SYSDATE,'')
+	</insert>
+</mapper> 

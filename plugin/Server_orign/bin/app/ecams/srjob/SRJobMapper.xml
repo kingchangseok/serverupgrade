@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="srmapper" >	
+	<resultMap id="getSRInfo_Result" type="app.ecams.srjob.model.SRJobInfo">
+		<result property="ccID" 		column="cc_srid" />
+		<result property="ccTitle" 		column="cc_reqtitle" />
+		<result property="ccComment" 	column="cc_content" />
+		<result property="ccStatusCD" 	column="cc_status" />
+		<result property="ccEditorName" column="cm_username" />
+		<result property="ccEditor" 	column="cc_editor" />
+		<result property="ccCatType" 	column="cattype" />
+		<result property="ccChgType" 	column="chgtype" />
+		<result property="ccWorkRank" 	column="workrank" />
+	</resultMap>
+	
+	<resultMap id="getSResource_Result" type="app.ecams.srjob.model.SRJobInfo">
+		<result property="itemid" column="cr_itemid" />
+		<result property="rsrcname" column="cr_rsrcname" />
+		<result property="syscd" column="cr_syscd" />
+		<result property="sysmsg" column="cm_sysmsg"/>
+		<result property="prjname" column="cm_prjname"/>
+		<result property="jobcd" column="cr_jobcd" />
+		<result property="dsncd" column="cr_dsncd" />
+		<result property="status" column="cr_status" />
+		<result property="dirpath" column="cm_dirpath" />
+		<result property="ccID" column="cc_srid" />
+		<result property="ccStatusCD" column="cc_status" />
+		<result property="ccEditor" column="cr_editor" />
+<!--	<result property="ccID" column="cr_srid" />	-->
+		<result property="ccTitle" column="cc_srtitle" />
+		<result property="rsrccd" column="cr_rsrccd"/>
+		
+		<result property="lstver" column="cr_lstver"/>
+		<result property="tstver" column="cr_tstver"/>
+		<result property="jobname" column="cm_jobname"/>
+		<result property="lstusr" column="cr_lstusr"/>
+		<result property="editorname" column="editorname"/>
+		<result property="lstusrname" column="lstusrname"/>
+		<result property="lastdate" column="lastdate"/>
+		<result property="tstmd5" column="cr_tstmd5"/>
+		<result property="sta" column="sta"/>
+		<result property="jawon" column="jawon"/>
+		<result property="md5sum" column="cr_md5sum"/>
+		<result property="cm_info" column="cm_info"/>
+		
+		<result property="basepath" column="basepath"/>
+	</resultMap>
+	
+	<select id="getSRInfo" parameterType="hashmap" resultMap="getSRInfo_Result">
+		select a.cc_srid, a.cc_reqtitle, a.cc_content, c.cc_status, b.cm_username, c.cc_editor, 
+			   d.cm_codename cattype, e.cm_codename chgtype, f.cm_codename workrank
+		  from cmc0100 a, cmm0040 b, cmc0110 c, cmm0020 d, cmm0020 e, cmm0020 f
+		 where c.cc_status in ('2','A','C','F')
+		   and a.cc_status = '4'
+		   
+		   <if test='!isAdmin.equals("Y")'>
+		       and c.cc_userid = #{ccEditor}
+		   </if>
+		
+		   and b.cm_userid = c.cc_editor
+		   and a.cc_srid   = c.cc_srid
+		   and d.cm_macode = 'ISRSTAUSR'
+		   and d.cm_micode = c.cc_status
+		   and e.cm_macode = 'CHGTYPE'
+		   and e.cm_micode = a.cc_chgtype
+		   and f.cm_macode = 'WORKRANK'
+		   and f.cm_micode = a.cc_workrank
+		 order by a.cc_srid desc
+	</select>
+	
+	<select id="getSResource" parameterType="hashmap" resultMap="getSResource_Result">
+		select a.cr_itemid, a.cr_rsrcname, a.cr_syscd, a.cr_jobcd, a.cr_dsncd, b.cc_reqtitle, d.cm_sysmsg, f.cm_deptcd as cm_prjname,
+		       a.cr_editor, a.cr_status, a.cr_isrid, b.cc_status, c.cm_dirpath, b.cc_srid, a.cr_rsrccd,
+		       a.cr_lstver, '' cr_tstver, f.cm_jobname, a.cr_lstusr, h.cm_username lstusrname,
+		       to_char(a.cr_lastdate,'yyyy/mm/dd/hh24/mi/ss') as lastdate, '' cr_tstver, '' cr_tstmd5,
+		       j.cm_codename sta, g.cm_codename jawon, i.cm_username editorname, k.cm_info, e.cr_md5sum
+		  from cmr0020 a, cmc0100 b, cmm0070 c, cmm0030 d, cmr0025 e, cmm0102 f, cmm0020 g, cmm0040 h, cmm0040 i, cmm0020 j,cmm0036 k, cmm0044 l
+		 where a.cr_isrid = #{srid}
+		   and a.cr_status not in ('0','9')
+		   
+		 <if test="editor != null">
+		   and a.cr_editor = #{editor}
+		 </if>
+		   and a.cr_itemid = e.cr_itemid(+)
+		   and a.cr_lstver = e.cr_ver(+)
+		   and a.cr_jobcd = f.cm_jobcd
+		   and g.cm_macode = 'JAWON'
+		   and g.cm_micode = a.cr_rsrccd
+		   and j.cm_macode = 'CMR0020'
+		   and j.cm_micode = a.cr_status
+		   and a.cr_lstusr = h.cm_userid
+		   and a.cr_editor = i.cm_userid
+		   and a.cr_syscd = k.cm_syscd
+		   and a.cr_rsrccd = k.cm_rsrccd
+		   and a.cr_isrid = b.cc_srid
+		   and a.cr_syscd = c.cm_syscd
+		   and a.cr_dsncd = c.cm_dsncd
+		   and a.cr_syscd = d.cm_syscd
+		   and d.cm_closedt is null
+           and k.cm_rsrccd not in ( select cm_samersrc from cmm0037
+								 where  cm_syscd = k.cm_syscd
+								 and    cm_samersrc is not null )		  
+           and a.cr_syscd = l.cm_syscd                                       
+           and l.cm_userid = a.cr_editor                                               
+           and a.cr_syscd=l.cm_syscd
+           and a.cr_jobcd=l.cm_jobcd								  
+	</select>
+	
+	<select id="getCmc0100" parameterType="String" resultType="hashmap">
+		select cc_status, cm_codename
+		  from cmc0100, cmm0020
+		 where cc_srid = #{id}
+		   and cm_macode = 'ISRSTA'
+		   and cm_micode = cc_status
+	</select>
+	
+	<select id="getCmc0110" parameterType="hashmap" resultType="hashmap">
+		select cc_status, cm_codename
+		  from cmc0110, cmm0020
+		 where cc_srid = #{srid}
+		   and cc_userid = #{editor}
+		   and cm_macode = 'ISRSTAUSR'
+		   and cm_micode = cc_status
+	</select>
+	
+	<select id="chkMySR" parameterType="hashmap" resultType="java.lang.Integer">
+		select count(*)
+		  from cmc0100 a, cmc0110 b
+		 where a.cc_srid = #{srid}
+		   and b.cc_userid = #{editor}
+		   and a.cc_status = '4'
+		   and b.cc_status in ('2', 'A', 'C')
+		   and a.cc_srid = b.cc_srid
+	</select>
+	
+	<select id="getSResource2" parameterType="hashmap" resultMap="getSResource_Result"> <!-- 20210106 SR사용안함 옵션이어도 리소스목록 새로고침 가능하게 -->
+		select a.cr_itemid, a.cr_rsrcname, a.cr_syscd, a.cr_jobcd, a.cr_dsncd,  '' cc_reqtitle, d.cm_sysmsg, f.cm_deptcd as cm_prjname,
+		       a.cr_editor, a.cr_status, a.cr_isrid, '' cc_status, c.cm_dirpath, '' cc_srid, a.cr_rsrccd,
+		       a.cr_lstver, '' cr_tstver, f.cm_jobname, a.cr_lstusr, h.cm_username lstusrname,
+		       to_char(a.cr_lastdate,'yyyy/mm/dd/hh24/mi/ss') as lastdate, '' cr_tstver, '' cr_tstmd5,
+		       j.cm_codename sta, g.cm_codename jawon, i.cm_username editorname, k.cm_info, e.cr_md5sum,
+		       a.cr_realacpt,a.cr_realusr,a.cr_realdate,SYSHOMEPATH(a.cr_syscd, a.cr_rsrccd) basepath
+		  from cmr0020 a, cmm0070 c, cmm0030 d, cmr0025 e, cmm0102 f, cmm0020 g, cmm0040 h, cmm0040 i, cmm0020 j,cmm0036 k, cmm0044 l
+		 where a.cr_status not in ('0','9')
+			   and a.cr_editor = #{editor}
+		   and a.cr_itemid = e.cr_itemid(+)
+		   and a.cr_lstver = e.cr_ver(+)
+		   and a.cr_jobcd = f.cm_jobcd
+		   and g.cm_macode = 'JAWON'
+		   and g.cm_micode = a.cr_rsrccd
+		   and j.cm_macode = 'CMR0020'
+		   and j.cm_micode = a.cr_status
+		   and a.cr_lstusr = h.cm_userid
+		   and a.cr_editor = i.cm_userid
+		   and a.cr_syscd = k.cm_syscd
+		   and a.cr_rsrccd = k.cm_rsrccd
+		   and a.cr_syscd = c.cm_syscd
+		   and a.cr_dsncd = c.cm_dsncd
+		   and a.cr_syscd = d.cm_syscd
+		   and d.cm_closedt is null
+           and k.cm_rsrccd not in ( select cm_samersrc from cmm0037
+								 where  cm_syscd = k.cm_syscd
+								 and    cm_samersrc is not null )		  
+           and a.cr_syscd = l.cm_syscd                                       
+           and l.cm_userid = a.cr_editor                                               
+           and a.cr_syscd=l.cm_syscd
+           and a.cr_jobcd=l.cm_jobcd
+           and substr(d.cm_sysinfo,10,1)='1'						  
+	</select>
+</mapper>

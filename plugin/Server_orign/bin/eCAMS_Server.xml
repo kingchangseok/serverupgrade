@@ -1,0 +1,130 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:aop="http://www.springframework.org/schema/aop"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:tx="http://www.springframework.org/schema/tx"
+	xsi:schemaLocation="
+		http://www.springframework.org/schema/beans 
+		http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+		http://www.springframework.org/schema/aop
+		http://www.springframework.org/schema/aop/spring-aop-3.0.xsd
+		http://www.springframework.org/schema/context
+		http://www.springframework.org/schema/context/spring-context-3.0.xsd
+		http://www.springframework.org/schema/tx
+		http://www.springframework.org/schema/tx/spring-tx-3.0.xsd">
+			
+	<!-- 
+	<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close">
+	-->
+	<bean id="dataSource" class="app.CryptoDataSource" destroy-method="close">
+	
+		<property name="driverClassName" value="net.sf.log4jdbc.DriverSpy"/>
+		
+		<property name="url" value="****"/>
+		<property name="username" value="****"/>
+		<property name="password" value="****"/>
+		<!--<property name="defaultAutoCommit" value="false"/>-->
+		
+		<property name="initialSize" value="30" /> <!-- 초기에 생성되는 커넥션의 수 -->
+		<property name="maxActive" value="1000" /> <!-- 최대 커넥션 갯수 -->
+		<!--<property name="maxIdle" value="5" />--> <!-- 사용되지 않는 커넥션을 풀에 저장할 최대갯수 -->
+		<!--<property name="minIdle" value="0" />--> <!-- 사용하지 않는 커넷션이 풀에 저장될 최소갯수 --> 
+		<property name="timeBetweenEvictionRunsMillis" value="600000"/> <!-- 해당 초마다 유효성 검사진행(1000=1초) 음수면 검사안함(-1) -->
+		<property name="minEvictableIdleTimeMillis" value="60000"/> <!-- 풀에 대기중인 시간이 설정된 값보다 크다면 validationQuery와 관계없이 풀에서 제거 -->
+		<property name="logAbandoned" value="true" /> <!-- 사용되지 않는 DB연결을 유발하는 코드를 찾을 수 있는 로그를 남기도록 설정 -->
+		<property name="poolPreparedStatements" value="true" /> <!-- 동일한 문장이 여러번 연속적으로 실행되거나 비교적 연속적으로 실행된다면 월등한 성능향상을 얻음 -->
+		<property name="maxOpenPreparedStatements" value="100" /> <!-- 풀링되는 statements의 최대값. 한 커넥션에서 오픈가능한 최대 cursor보다 작게 설정 -->
+		<property name="testOnBorrow" value="false"/> <!-- 커넥션을 가져올때 커넥션이 유효한지 검사할지 여부 -->
+		<property name="testOnReturn" value="false"/> <!-- 커넥션을 반환할때 커넥션이 유효한지 검사할지 여부 -->
+		<property name="testWhileIdle" value="false"/> <!-- 커넥션이 놀고있을때 유효성 검사를 할지 여부, 유효하지않은 커넥션풀에서 제거 -->
+		<property name="removeAbandoned" value="true"/>
+		<property name="removeAbandonedTimeout" value="60"/>
+		<property name="validationQuery" value="select 1 from dual"/> 
+	</bean>
+
+	<tx:annotation-driven transaction-manager="txManager"/>
+
+    
+	<!-- a PlatformTransactionManager is still required -->
+	<bean id="txManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<!-- (this dependency is defined somewhere else) -->
+		<property name="dataSource" ref="dataSource"/>
+	</bean>
+	
+	<bean id="defaultTransactionDefinition" class="org.springframework.transaction.support.DefaultTransactionDefinition">
+		<constructor-arg index="0" value="0" />
+	</bean>
+	
+		
+	<bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+		<property name="dataSource" ref="dataSource" />
+		<property name="configLocation" value="MapperConfig.xml"/>
+	</bean>
+
+	<!-- 
+	<bean id="sqlSession" clas   ="org.mybatis.spring.SqlSession">
+		<property name="sqlSessionFactory" ref="sqlSessionFactory"/>
+	</bean>
+	 -->
+
+
+	<bean id="sqlSession" class="org.mybatis.spring.SqlSessionTemplate">
+		<constructor-arg index="0" ref="sqlSessionFactory" />
+		<constructor-arg index="1" value="SIMPLE" />
+	</bean>
+	
+	 
+	<bean id="Encryptor" class="app.util.crypto.Encryptor"/>	
+
+	<bean id="gzip" class="app.util.file.Gzip"/>
+	
+	<context:annotation-config/>
+	<context:component-scan base-package="app" use-default-filters="false">
+		<context:include-filter type="annotation" expression="org.springframework.stereotype.Repository"/>
+		<context:include-filter type="annotation" expression="org.springframework.stereotype.Service"/>
+	</context:component-scan>
+	 
+	<!-- netty  -->
+	
+	<bean id="org.jboss.netty.internal.ResourceFactory"
+        class="org.jboss.netty.container.spring.NettyResourceFactory"
+        scope="singleton" />
+        
+	<bean id="org.jboss.netty.internal.ChannelFactoryExecutor"
+        factory-bean="org.jboss.netty.internal.ResourceFactory"
+        factory-method="getChannelFactoryExecutor"
+        scope="singleton" />
+        
+	<bean lazy-init="true" scope="singleton"
+	      name="org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory"
+	      class="org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory">
+		<constructor-arg ref="org.jboss.netty.internal.ChannelFactoryExecutor"/>
+		<constructor-arg ref="org.jboss.netty.internal.ChannelFactoryExecutor"/>
+	</bean>
+	
+	
+	
+	
+	<bean id="applicationContext" class="app.core.context.EcamsContext" />
+
+ 	<bean id="ecamsServerHandler" class="app.core.socket.EcamsServerHandler"/>
+	
+	<bean id="EcamsServerPipelineFactory" class="app.core.socket.EcamsServerPipelineFactory">
+		<property name="handler" ref="ecamsServerHandler"/>
+	</bean>
+	
+	<bean id="ServerBootstrap" class="org.jboss.netty.bootstrap.ServerBootstrap">
+		<property name="pipelineFactory" ref="EcamsServerPipelineFactory"/>
+		<property name="factory" ref="org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory"/>
+	</bean>	
+	
+ 	<bean id="ecamsServerSock" class="app.core.socket.EcamsServerSock">
+ 		<property name="bootstrap" ref="ServerBootstrap"/>
+	</bean>
+	
+	<bean id="EcamsServer" class="app.Ecams_Server">
+		<property name="serversock" ref="ecamsServerSock"/>
+	</bean>
+	
+</beans>

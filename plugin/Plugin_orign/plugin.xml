@@ -1,0 +1,658 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+	<extension
+		point="org.eclipse.ui.startup">
+		<startup
+			class="com.azsoft.ecams.core.EcamsEaryStarter">
+		</startup>
+	</extension>
+
+	<extension
+		id="com.azsoft.ecams.nature"
+		name="eCAMS Nature"
+		point="org.eclipse.core.resources.natures">
+		<runtime>
+				<run
+					class="com.azsoft.ecams.core.EcamsProjectNature">
+	 			</run>
+		</runtime>
+	</extension>
+	
+	<extension
+		point="org.eclipse.ui.views">
+		<category
+			id="DragDropWorkbenchParts"
+			name="eCAMS"/>
+			<!--
+			<view
+			category="DragDropWorkbenchParts"
+			class="com.azsoft.ecams.ui.view.HistoryView"
+			icon="icons/console.gif"
+			id="com.azsoft.ecams.ui.view.historyview"
+			name="버전이력보기">
+			</view>
+			-->
+			<view
+				category="DragDropWorkbenchParts"
+				class="com.azsoft.ecams.ui.view.ResourceView"
+				icon="icons/resourceview.gif"
+				id="com.azsoft.ecams.ui.view.resourceview"
+				name="리소스목록">
+			</view>
+	
+			<view
+				category="DragDropWorkbenchParts"
+				class="com.azsoft.ecams.ui.view.ServiceRequestView"
+				icon="icons/listview.gif"
+				id="com.azsoft.ecams.ui.view.servicerequestview"
+				name="내 작업목록">
+			</view>
+	</extension> 
+
+   
+	<extension
+		point="org.eclipse.ui.preferencePages">
+		<page
+			class="com.azsoft.ecams.ui.preferencepage.EcamsPreferencePage"
+			id="eCamsPreferencePage"
+			name="eCAMS PlugIn">
+		</page>
+	</extension>
+	
+	<extension
+		point="org.eclipse.ui.propertyPages">
+		<page
+			adaptable="true"
+			class="com.azsoft.ecams.ui.propertiespage.EcamsPropertiesPage"
+			id="eCamsPropertiesPage"
+			name="eCAMS PlugIn"
+			objectClass="org.eclipse.core.resources.IProject">
+		</page>
+	</extension>
+	
+	<!-- Package Explorer -->
+	<extension
+		point="org.eclipse.ui.popupMenus">
+		<viewerContribution
+			id="com.azsoft.ecams.objectContribution"
+			targetID="org.eclipse.jdt.ui.PackageExplorer">
+			
+			<visibility>
+				<and>
+					<objectState
+						name="projectNature"
+						value="com.azsoft.ecams.nature">
+					</objectState>			
+					<or>
+						<objectClass
+							name="org.eclipse.core.resources.IResource">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.JavaProject">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.PackageFragmentRoot">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.PackageFragment">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.CompilationUnit">
+						</objectClass>																								
+					</or>
+				</and>			
+			</visibility>
+			
+			<menu
+         icon="icons/menu.gif"
+         id="eCAMSMenu"
+         label="e&amp;CAMS(C)">
+				
+				<separator
+					name="group1">
+				</separator>
+				
+				<separator
+					name="group2">
+				</separator>
+				
+				<separator
+					name="group3">
+				</separator>
+				
+				<separator
+					name="group4">
+				</separator>
+			</menu>
+			
+			<action
+				class="com.azsoft.ecams.popmenu.action.RegistFileAll"
+				id="com.azsoft.ecams.action.registfileall"
+				label="Regist File and Check-In"
+				enablesFor="+"
+				menubarPath="eCAMSMenu/group2">
+				<enablement>
+					<systemProperty
+						 name="isAdmin"
+						 value="1">
+					</systemProperty>
+				</enablement>
+			</action>
+			
+			<action
+				class="com.azsoft.ecams.popmenu.action.RegistFileNew"
+				id="com.azsoft.ecams.action.registfilenew"
+				label="Regist New File"
+				enablesFor="+"
+				menubarPath="eCAMSMenu/group2">
+				<!--
+				<enablement>
+					<systemProperty
+						 name="isAdmin"
+						 value="1">
+					</systemProperty>
+				</enablement>
+				-->
+			</action>			
+ 
+			<action
+				class="com.azsoft.ecams.popmenu.action.SyncSelectedResource"
+				id="com.azsoft.ecams.action.sync"
+				label="Synchronize with eCAMS"
+				menubarPath="eCAMSMenu/group2">
+			</action>
+		</viewerContribution>
+		
+		<viewerContribution
+			id="com.azsoft.ecams.objectContribution2"
+			targetID="org.eclipse.jdt.ui.PackageExplorer">
+			<visibility>
+				<and>
+					<objectState
+						name="projectNature"
+						value="com.azsoft.ecams.nature">
+					</objectState>
+					<or>
+						<objectClass
+							name="org.eclipse.core.resources.IFile">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.CompilationUnit">
+						</objectClass>						
+					</or>
+				</and>
+			</visibility>
+			
+			<action
+				class="com.azsoft.ecams.popmenu.action.SourceDiff"
+				id="com.azsoft.ecams.action.sourcediff"
+				label="Compare with Each Other" 
+				enablesFor="1"
+				menubarPath="eCAMSMenu/group3">
+			</action>
+ 
+			<action
+         class="com.azsoft.ecams.popmenu.action.ShowHistory"
+         enablesFor="1"
+         icon="icons/showhistory.gif"
+         id="com.azsoft.ecams.action.showhistory"
+         label="Show History"
+         menubarPath="eCAMSMenu/group3">
+			</action>
+		</viewerContribution> 		
+		
+		<viewerContribution
+			id="com.azsoft.ecams.objectContribution3"
+			targetID="org.eclipse.jdt.ui.PackageExplorer">
+			<visibility>
+				<and>
+					<objectState
+						name="projectNature"
+						value="com.azsoft.ecams.nature">
+					</objectState>
+					<or>
+						<objectClass
+							name="org.eclipse.core.resources.IProject">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.JavaProject">
+						</objectClass>					
+					</or>
+				</and>
+			</visibility>
+			
+			<action
+         class="com.azsoft.ecams.popmenu.action.DisConnect"
+         icon="icons/disconnect.gif"
+         id="com.azsoft.ecams.action.disconnect"
+         label="Disconnect"
+         menubarPath="eCAMSMenu/group4">
+			</action>
+		
+		</viewerContribution>
+		
+<viewerContribution
+			id="com.azsoft.ecams.objectContribution4"
+			targetID="org.eclipse.ui.navigator.ProjectExplorer#PopupMenu">
+			
+			<visibility>
+				<and>
+					<objectState
+						name="projectNature"
+						value="com.azsoft.ecams.nature">
+					</objectState>			
+					<or>
+						<objectClass
+							name="org.eclipse.core.resources.IResource">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.JavaProject">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.PackageFragmentRoot">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.PackageFragment">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.CompilationUnit">
+						</objectClass>																								
+					</or>
+				</and>			
+			</visibility>
+			
+			<menu
+         icon="icons/menu.gif"
+         id="eCAMSMenu2"
+         label="e&amp;CAMS(C)">
+				
+				<separator
+					name="group1">
+				</separator>
+				
+				<separator
+					name="group2">
+				</separator>
+				
+				<separator
+					name="group3">
+				</separator>
+				
+				<separator
+					name="group4">
+				</separator>
+			</menu>
+			
+			<action
+				class="com.azsoft.ecams.popmenu.action.RegistFileAll"
+				id="com.azsoft.ecams.action.registfileall"
+				label="Regist File and Check-In"
+				enablesFor="+"
+				menubarPath="eCAMSMenu2/group2">
+				<enablement>
+					<systemProperty
+						 name="isAdmin"
+						 value="1">
+					</systemProperty>
+				</enablement>
+			</action>
+			
+			<action
+				class="com.azsoft.ecams.popmenu.action.RegistFileNew"
+				id="com.azsoft.ecams.action.registfilenew"
+				label="Regist New File"
+				enablesFor="+"
+				menubarPath="eCAMSMenu2/group2">
+				<!--
+				<enablement>
+					<systemProperty
+						 name="isAdmin"
+						 value="1">
+					</systemProperty>
+				</enablement>
+				-->
+			</action>			
+ 
+			<action
+				class="com.azsoft.ecams.popmenu.action.SyncSelectedResource"
+				id="com.azsoft.ecams.action.sync"
+				label="Synchronize with eCAMS"
+				menubarPath="eCAMSMenu2/group2">
+			</action>
+		</viewerContribution>
+		
+		<viewerContribution
+			id="com.azsoft.ecams.objectContribution5"
+			targetID="org.eclipse.ui.navigator.ProjectExplorer#PopupMenu">
+			<visibility>
+				<and>
+					<objectState
+						name="projectNature"
+						value="com.azsoft.ecams.nature">
+					</objectState>
+					<or>
+						<objectClass
+							name="org.eclipse.core.resources.IFile">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.CompilationUnit">
+						</objectClass>						
+					</or>
+				</and>
+			</visibility>
+			
+			<action
+				class="com.azsoft.ecams.popmenu.action.SourceDiff"
+				id="com.azsoft.ecams.action.sourcediff"
+				label="Compare with Each Other" 
+				enablesFor="1"
+				menubarPath="eCAMSMenu2/group3">
+			</action>
+ 
+			<action
+         class="com.azsoft.ecams.popmenu.action.ShowHistory"
+         enablesFor="1"
+         icon="icons/showhistory.gif"
+         id="com.azsoft.ecams.action.showhistory"
+         label="Show History"
+         menubarPath="eCAMSMenu2/group3">
+			</action>
+		</viewerContribution> 		
+		
+		<viewerContribution
+			id="com.azsoft.ecams.objectContribution6"
+			targetID="org.eclipse.ui.navigator.ProjectExplorer#PopupMenu">
+			<visibility>
+				<and>
+					<objectState
+						name="projectNature"
+						value="com.azsoft.ecams.nature">
+					</objectState>
+					<or>
+						<objectClass
+							name="org.eclipse.core.resources.IProject">
+						</objectClass>
+						<objectClass
+							name="org.eclipse.jdt.internal.core.JavaProject">
+						</objectClass>					
+					</or>
+				</and>
+			</visibility>
+			
+			<action
+         class="com.azsoft.ecams.popmenu.action.DisConnect"
+         icon="icons/disconnect.gif"
+         id="com.azsoft.ecams.action.disconnect"
+         label="Disconnect"
+         menubarPath="eCAMSMenu2/group4">
+			</action>
+		
+		</viewerContribution>
+  <viewerContribution
+        id="com.azsoft.ecams.objectContribution7"
+        targetID="org.eclipse.ui.views.ResourceNavigator">
+     <visibility>
+        <and>
+           <objectState
+                 name="projectNature"
+                 value="com.azsoft.ecams.nature">
+           </objectState>
+           <or>
+              <objectClass
+                    name="org.eclipse.core.resources.IResource">
+              </objectClass>
+              <objectClass
+                    name="org.eclipse.jdt.internal.core.JavaProject">
+              </objectClass>
+              <objectClass
+                    name="org.eclipse.jdt.internal.core.PackageFragmentRoot">
+              </objectClass>
+              <objectClass
+                    name="org.eclipse.jdt.internal.core.PackageFragment">
+              </objectClass>
+              <objectClass
+                    name="org.eclipse.jdt.internal.core.CompilationUnit">
+              </objectClass>
+           </or>
+        </and>
+     </visibility>
+     <menu
+           icon="icons/menu.gif"
+           id="eCAMSMenu3"
+           label="e&amp;CAMS(C)">
+        <separator
+              name="group1">
+        </separator>
+        <separator
+              name="group2">
+        </separator>
+        <separator
+              name="group3">
+        </separator>
+        <separator
+              name="group4">
+        </separator>
+     </menu>
+     <action
+           class="com.azsoft.ecams.popmenu.action.RegistFileAll"
+           enablesFor="+"
+           id="com.azsoft.ecams.action.registfileall"
+           label="Regist File and Check-In"
+           menubarPath="eCAMSMenu3/group2">
+     </action>
+     <action
+           class="com.azsoft.ecams.popmenu.action.RegistFileNew"
+           enablesFor="+"
+           id="com.azsoft.ecams.action.registfilenew"
+           label="Regist New File"
+           menubarPath="eCAMSMenu3/group2">
+     </action>
+     <action
+           class="com.azsoft.ecams.popmenu.action.SyncSelectedResource"
+           id="com.azsoft.ecams.action.sync"
+           label="Synchronize with eCAMS"
+           menubarPath="eCAMSMenu3/group2">
+     </action>
+  </viewerContribution>
+  <viewerContribution
+        id="com.azsoft.ecams.objectContribution8"
+        targetID="org.eclipse.ui.views.ResourceNavigator">
+     <visibility>
+        <and>
+           <objectState
+                 name="projectNature"
+                 value="com.azsoft.ecams.nature">
+           </objectState>
+           <or>
+              <objectClass
+                    name="org.eclipse.core.resources.IFile">
+              </objectClass>
+              <objectClass
+                    name="org.eclipse.jdt.internal.core.CompilationUnit">
+              </objectClass>
+           </or>
+        </and>
+     </visibility>
+     <action
+           class="com.azsoft.ecams.popmenu.action.SourceDiff"
+           enablesFor="1"
+           id="com.azsoft.ecams.action.sourcediff"
+           label="Compare with Each Other"
+           menubarPath="eCAMSMenu3/group3">
+     </action>
+     <action
+           class="com.azsoft.ecams.popmenu.action.ShowHistory"
+           enablesFor="1"
+           icon="icons/showhistory.gif"
+           id="com.azsoft.ecams.action.showhistory"
+           label="Show History"
+           menubarPath="eCAMSMenu3/group3">
+     </action>
+  </viewerContribution>
+  <viewerContribution
+        id="com.azsoft.ecams.objectContribution9"
+        targetID="org.eclipse.ui.views.ResourceNavigator">
+     <visibility>
+        <and>
+           <objectState
+                 name="projectNature"
+                 value="com.azsoft.ecams.nature">
+           </objectState>
+           <or>
+              <objectClass
+                    name="org.eclipse.core.resources.IProject">
+              </objectClass>
+              <objectClass
+                    name="org.eclipse.jdt.internal.core.JavaProject">
+              </objectClass>
+           </or>
+        </and>
+     </visibility>
+     <action
+           class="com.azsoft.ecams.popmenu.action.DisConnect"
+           icon="icons/disconnect.gif"
+           id="com.azsoft.ecams.action.disconnect"
+           label="Disconnect"
+           menubarPath="eCAMSMenu3/group4">
+     </action>
+  </viewerContribution>		
+	</extension>
+	
+	<extension
+		point="org.eclipse.ui.decorators">
+		<decorator
+			adaptable="true"
+			class="com.azsoft.ecams.ui.decorator.EcamsLightweightDecorator"
+			id="eCAMS_Plugin.decorator"
+			label="ecamsDecorator"
+			lightweight="true"
+			location="TOP_LEFT"
+			objectClass="org.eclipse.core.resources.IResource"
+			state="true">
+		</decorator>
+	</extension>
+	
+	<extension
+		point="org.eclipse.team.core.ignore">
+		<ignore
+			enabled="true"
+			pattern="**/.ecm">
+		</ignore>
+	</extension>
+	
+	<!--
+	<extension
+		point="org.eclipse.ui.console.consoleFactories">
+		<consoleFactory
+			class="com.azsoft.ecams.core.Factory"
+			icon="icons/console.gif"
+			label="eCAMS Console">
+		</consoleFactory>
+	</extension>
+	-->
+<!--category="org.eclipse.ui.Basic"-->
+
+	<extension
+		point="org.eclipse.ui.newWizards">
+		<category
+			id="com.azsoft.ecams"
+			name="eCAMS"/>
+		<wizard
+			canFinishEarly="false"
+			category="com.azsoft.ecams"
+			class="com.azsoft.ecams.ui.wizard.NewProjectWizard"
+			hasPages="true"
+			icon="icons/Eclipse_icon_newprj_wiz.gif"
+			id="com.azsoft.ecams.ui.wizard.newproject"
+			name="eCAMS Project"
+			project="true">
+		</wizard>
+	</extension>
+ <extension
+       point="org.eclipse.ui.commands">
+       <!-- 버전비교 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.VersionCompare"
+			id="com.azsoft.ecams.plugin.commands.resource.VersionCompare"
+			name="VersionCompare">
+		</command>
+		
+		<!-- 리소스버전정보 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.VersionInfo"
+			id="com.azsoft.ecams.plugin.commands.resource.VersionInfo"
+			name="VersionInfo">
+		</command>
+		
+		<!-- 리소스 히스토리 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.VersionHistory"
+			id="com.azsoft.ecams.plugin.commands.resource.VersionHistory"
+			name="VersionHistory">
+		</command>
+		
+		<!-- 동기화 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.Sync"
+			id="com.azsoft.ecams.plugin.commands.resource.Sync"
+			name="Sync">
+		</command>
+		
+		<!-- 덮어쓰기 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.SyncReplace"
+			id="com.azsoft.ecams.plugin.commands.resource.SyncReplace"
+			name="SyncReplace">
+		</command>
+		
+		<!-- 가져오기 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.SyncGet"
+			id="com.azsoft.ecams.plugin.commands.resource.SyncGet"
+			name="SyncGet">
+		</command>
+		
+		<!-- 서버접속여부 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.IsConnected"
+			id="com.azsoft.ecams.plugin.commands.common.IsConnected"
+			name="IsConnected">
+		</command>
+		
+		<!-- 로그인 ID -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.GetLoginId"
+			id="com.azsoft.ecams.plugin.commands.common.GetLoginId"
+			name="GetLoginId">
+		</command>
+		
+		<!-- eCAMS프로젝트 여부 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.IsCFProject"
+			id="com.azsoft.ecams.plugin.commands.common.IsCFProject"
+			name="IsCFProject">
+		</command>
+		
+		<!-- eCAMS프로젝트 접속 Host정보 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.GetCFConnectionHost"
+			id="com.azsoft.ecams.plugin.commands.common.GetCFConnectionHost"
+			name="GetCFConnectionHost">
+		</command>
+		
+		<!-- 로그인한 사용자의 관리자여부 -->
+		<command
+			defaultHandler="com.azsoft.ecams.core.icommands.IsAdmin"
+			id="com.azsoft.ecams.plugin.commands.common.IsAdmin"
+			name="IsAdmin">
+		</command>
+		
+		<command
+			id="com.azsoft.ecams.action.sync"
+			name="sync">
+		</command>
+ </extension>
+	
+	
+</plugin>

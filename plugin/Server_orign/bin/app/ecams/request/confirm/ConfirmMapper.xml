@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="confirm">
+	<insert id="insertCmr9900_select" parameterType="hashmap">
+		insert into cmr9900
+		(CR_ACPTNO,CR_SEQNO,CR_LOCAT,CR_CONFNAME,CR_TEAM,CR_TEAMCD,CR_STATUS,CR_CONGBN,
+		CR_COMMON, CR_BLANK,CR_EMGER,CR_HOLI,CR_SGNGBN,CR_ORGSTEP,CR_BASEUSR, CR_PRCSW)
+		(SELECT #{CM_ACPTNO},1,lpad(a.CM_seqno,2,'0'),a.CM_NAME,a.CM_JOBCD,a.CM_GUBUN,
+		'0',a.CM_COMMON,a.CM_COMMON,a.CM_BLANK,a.CM_EMG,a.CM_HOLIDAY,
+		a.CM_POSITION,a.CM_ORGSTEP,a.CM_JOBCD,a.CM_PRCSW
+		FROM Cmm0060 a,cmm0040 b
+		WHERE a.CM_SYSCD=#{CM_SYSCD}
+		AND a.CM_REQCD= #{CM_QRYCD} 
+		and b.cm_userid= #{CM_USERID}
+		<if test="CM_GUBUN != null">
+			and CM_GUBUN=#{CM_GUBUN}
+		</if>
+		AND a.CM_MANID=decode(b.cm_manid,'N','2','1')	)	
+	</insert>
+	<insert id="insertCmr9900_default" parameterType="hashmap">
+		insert into cmr9900
+		(CR_ACPTNO,CR_SEQNO,CR_LOCAT,
+		<if test="CR_CONFNAME != null" >
+			CR_CONFNAME,
+		</if>
+		<if test="CR_TEAM != null" >
+			CR_TEAM,
+		</if>
+		<if test="CR_TEAMCD != null" >
+			CR_TEAMCD,
+		</if>
+		<if test="CR_CONGBN != null" >
+			CR_CONGBN,
+		</if>
+		<if test="CR_COMMON != null" >
+			CR_COMMON,
+		</if>
+		<if test="CR_BLANK != null" >
+			CR_BLANK,
+		</if>
+		<if test="CR_EMGER != null" >
+			CR_EMGER,
+		</if>
+		<if test="CR_HOLI != null" >
+			CR_HOLI,
+		</if>
+		<if test="CR_SGNGBN != null" >
+			CR_SGNGBN,
+		</if>
+		<if test="CR_ORGSTEP != null" >
+			CR_ORGSTEP,
+		</if>
+		<if test="CR_BASEUSR != null" >
+			CR_BASEUSR,
+		</if>
+		<if test="CR_PRCSW != null" >
+			CR_PRCSW,
+		</if>
+		<if test="CR_CONFUSR != null" >
+			CR_CONFUSR,
+		</if>
+		CR_STATUS) values (
+		#{CR_ACPTNO},'1',lpad(#{CR_LOCAT},2,'0'),
+		<if test="CR_CONFNAME != null" >
+			#{CR_CONFNAME},
+		</if>
+		<if test="CR_TEAM != null" >
+			#{CR_TEAM},
+		</if>
+		<if test="CR_TEAMCD != null" >
+			#{CR_TEAMCD},
+		</if>
+		<if test="CR_CONGBN != null" >
+			#{CR_CONGBN},
+		</if>
+		<if test="CR_COMMON != null" >
+			#{CR_COMMON},
+		</if>
+		<if test="CR_BLANK != null" >
+			#{CR_BLANK},
+		</if>
+		<if test="CR_EMGER != null" >
+			#{CR_EMGER},
+		</if>
+		<if test="CR_HOLI != null" >
+			#{CR_HOLI},
+		</if>
+		<if test="CR_SGNGBN != null" >
+			#{CR_SGNGBN},
+		</if>
+		<if test="CR_ORGSTEP != null" >
+			#{CR_ORGSTEP},
+		</if>
+		<if test="CR_BASEUSR != null" >
+			#{CR_BASEUSR},
+		</if>
+		<if test="CR_PRCSW != null" >
+			#{CR_PRCSW},
+		</if>
+		<if test="CR_CONFUSR != null" >
+			#{CR_CONFUSR},
+		</if>
+		#{CR_STATUS})
+	</insert>
+	
+	<update id="updateCmr9900" parameterType="hashmap">
+		update cmr9900
+		set CR_TEAM=
+		<choose>
+			<when test="CR_TEAM != null">
+		 		#{CR_TEAM}
+			</when>
+			<otherwise>
+				CR_SGNGBN
+			</otherwise>
+		</choose>
+		<if test="CR_BASEUSR != null">
+			,CR_BASEUSR = #{CR_BASEUSR}
+		</if>
+		WHERE CR_ACPTNO = #{CR_ACPTNO}
+		AND CR_TEAMCD=#{CR_TEAMCD}
+	</update>
+	
+	<select id="cmr9900_str" statementType="CALLABLE" parameterType="hashmap">
+		{call CMR9900_STR(#{CR_ACPTNO},#{CR_USERID},#{CR_SGNMSG},#{CR_SGNCD},#{CR_QRYCD},#{CR_CNCLSW})}
+	</select>
+	
+	<select id="confselect" parameterType="hashmap" resultType="hashmap">
+		select a.cm_gubun,a.cm_rsrccd                           
+  		from cmm0060 a,cmm0040 b                              
+ 		where a.cm_syscd=#{CM_SYSCD} and a.cm_reqcd=#{CM_REQCD}                    
+   		and decode(a.cm_manid,'1','Y','N')=b.cm_manid        
+   		and b.cm_userid=#{CM_USERID}                            
+	</select>
+	
+	<select id="insertCmr9900_Insert" statementType="CALLABLE" parameterType="java.lang.String">
+		{call CMM0060_STR(#{acptno})}
+	</select>
+	
+</mapper>
+

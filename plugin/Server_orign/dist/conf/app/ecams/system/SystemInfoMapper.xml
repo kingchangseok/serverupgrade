@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="systeminfo" >
+	<resultMap id="getSysInfo_ResultMap" type="app.ecams.system.model.SystemInfo" >
+	    <result column="CM_SYSCD" property="cmSyscd" jdbcType="VARCHAR" />
+	    <result column="CM_SYSMSG" property="cmSysmsg" jdbcType="VARCHAR" />
+	    <result column="CM_SYSINFO" property="cmSysinfo" jdbcType="VARCHAR" />
+	    <result column="CM_PRJNAME" property="cmPrjname" jdbcType="VARCHAR"/>
+	</resultMap>
+	
+	<resultMap id="getSysInfo_detail_ResultMap" type="hashmap">
+		<result column="cm_sysgb" property="cm_sysgb"/>
+		<result column="cm_sysfc1" property="cm_sysfc1"/>
+		<result column="cm_dirbase" property="cm_dirbase"/>
+		<result column="cm_sysinfo" property="cm_sysinfo"/>
+		<result column="diff1" property="diff1"/>
+		<result column="diff2" property="diff2"/>
+	</resultMap>
+	
+	<resultMap id="timecheck_ResultMap" type="hashmap">
+		<result column="cm_termcd" property="cm_termcd"/>
+		<result column="cm_sttime" property="cm_sttime"/>
+		<result column="cm_edtime" property="cm_edtime"/>
+		<result column="cm_termsub" property="cm_termsub"/>
+		<result column="weekday" property="weekday"/>
+		<result column="monday" property="monday"/>		
+		<result column="diff1" property="diff1"/>
+		<result column="diff2" property="diff2"/>
+	</resultMap>	
+
+	<resultMap id="getSysPath_ResultMap" type="hashmap" >
+	    <result column="cm_pathcd" property="cm_pathcd" jdbcType="VARCHAR" />
+	    <result column="cm_path" property="cm_path" jdbcType="VARCHAR" />
+	</resultMap>
+
+	<!-- 
+	select cm_syscd,cm_sysmsg
+	from cmm0030 
+	where cm_closedt is null
+	<if test="CM_USERID != null" >
+		and cm_syscd in (select cm_syscd from cmm0044
+		                      where cm_userid=#{CM_USERID}
+		                        and cm_closedt is null)
+	</if>
+	order by cm_sysmsg 
+	 -->
+	 
+	 <!-- parameterType="hashmap"
+	 <if test="CM_USERID != null" >
+			and a.cm_syscd in (select cm_syscd from cmm0044
+					      		where cm_userid=#{CM_USERID}
+			      			      and cm_closedt is null)
+	</if>  
+	
+	<select id="getSysInfo" resultMap="getSysInfo_ResultMap">
+		select a.cm_syscd,a.cm_sysmsg, a.cm_sysinfo, a.cm_prjname
+		from cmm0030 a, cmm0036 b
+		where a.cm_closedt is null
+		and a.cm_syscd = b.cm_syscd
+ 		and substr(b.cm_info,58,1) = '1' 
+		group by a.cm_syscd, a.cm_sysmsg, a.cm_sysinfo, a.cm_prjname
+		order by a.cm_sysmsg  			      
+	</select>
+	-->
+	<select id="getSysInfo" resultMap="getSysInfo_ResultMap">
+		select distinct a.cm_syscd,a.cm_sysmsg, a.cm_sysinfo, a.cm_prjname
+		from cmm0030 a, cmm0036 b
+		where a.cm_closedt is null
+		and a.cm_syscd = b.cm_syscd
+ 		and substr(b.cm_info,58,1) = '1' 
+        and b.cm_closedt is null
+        and substr(a.cm_sysinfo,13,1) = '1'
+		order by a.cm_sysmsg  			      
+	</select>
+	
+	<select id="getSysInfo_user" resultMap="getSysInfo_ResultMap">
+		select distinct a.cm_syscd,a.cm_sysmsg, a.cm_sysinfo, a.cm_prjname
+		from cmm0030 a, cmm0036 b, cmm0044 c
+		where a.cm_closedt is null
+		and a.cm_syscd = b.cm_syscd
+		and a.cm_syscd = c.cm_syscd
+		and c.cm_userid = #{CM_USERID}
+ 		and substr(b.cm_info,58,1) = '1' 
+        and b.cm_closedt is null
+        and substr(a.cm_sysinfo,13,1) = '1'
+        
+		order by a.cm_sysmsg  			      
+	</select>
+	<!-- group by a.cm_syscd, a.cm_sysmsg, a.cm_sysinfo, a.cm_prjname -->
+	
+	<select id="getSysInfo_detail" parameterType="String" resultMap="getSysInfo_detail_ResultMap">
+		select cm_sysgb, cm_sysfc1, cm_dirbase, cm_sysinfo,
+			   sign(nvl(cm_stopst,to_char(sysdate,'yyyymmddhh24mi')) - to_char(sysdate,'yyyymmddhh24mi')) diff1,
+			   sign(nvl(cm_stoped,to_char(sysdate,'yyyymmddhh24mi')) - to_char(sysdate,'yyyymmddhh24mi')) diff2
+		from cmm0030
+		where cm_syscd = #{id}
+		and cm_closedt is null
+        and substr(cm_sysinfo,13,1) = '1'
+	</select>
+	
+	<select id="timecheck" parameterType="String" resultMap="timecheck_ResultMap">
+		select cm_termcd,cm_sttime,cm_edtime,cm_termsub,
+		       to_char(SYSDATE,'d') weekday,            
+		       to_char(SYSDATE,'dd') monday,            
+		       sign(nvl(cm_sttime,to_char(sysdate,'hh24mi')) - to_char(sysdate,'hh24mi')) diff1,
+		       sign(nvl(cm_edtime,to_char(sysdate,'hh24mi')) - to_char(sysdate,'hh24mi')) diff2 
+		from cmm0330
+		where cm_syscd=#{id}	
+	</select>
+	
+	<select id="sysdirinfo" parameterType="String" resultMap="getSysPath_ResultMap">
+		select cm_pathcd,cm_path 
+		from cmm0012
+		where cm_stno='ECAMS'
+		  and cm_pathcd=#{id}	
+	</select>
+</mapper>

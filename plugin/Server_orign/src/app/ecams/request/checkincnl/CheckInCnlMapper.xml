@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="checkincnl">
+	
+	<update id="updateCmr1010_cnclyn" parameterType="hashmap">
+<!-- 		update cmr1010  -->
+<!-- 		set    cr_confno = #{SET_CR_CONFNO} -->
+<!-- 			 , cr_cnclyn = 'Y' -->
+<!--   		where  cr_acptno = #{PARAM_CR_BASENO} -->
+<!-- 		and    cr_itemid = #{PARAM_CR_ITEMID} -->
+<!-- 		and    substr(cr_acptno,5,2) in ('03') -->
+<!--   		and    cr_confno is null -->
+		{call RELATNO_UPDT(#{PARAM_CR_BASENO})}
+	</update>
+	
+	<select id="selectCmr1010_acptno" parameterType="hashmap" resultType="String">
+		select cr_acptno from cmr1010
+		where  cr_confno is null
+		and    cr_itemid  = #{CR_ITEMID}
+		and    cr_acptno != #{CR_ACPTNO}
+		and    cr_status  = '9'
+		and    substr(cr_acptno,5,2) ='03'
+		and	   rownum = 1
+	</select>
+	
+	<update id="updateCmr1010_confno" parameterType="hashmap">
+<!-- 		UPDATE CMR1010 A -->
+<!-- 		   SET CR_CONFNO = '' -->
+<!-- 		 where CR_ITEMID = #{CR_ITEMID} -->
+<!-- 		   and CR_ACPTNO = (select CR_BASENO from cmr1010  -->
+<!-- 		                     where CR_ACPTNO = #{CR_ACPTNO}  -->
+<!-- 		                       and CR_ITEMID = #{CR_ITEMID}) -->
+		{call RELATNO_UPDT(#{CR_ACPTNO})}
+	</update>
+	
+	<select id="selectCnl_count" parameterType="hashmap" resultType="String">
+		select c.cr_rsrcname 
+		  from cmr1000 a, cmr1010 b, cmr0020 c
+		 where a.cr_acptno = b.cr_acptno
+		   and b.cr_itemid = c.cr_itemid
+		   and a.cr_status = '9'
+		   and c.cr_status = 'B'
+		   and a.cr_qrycd ='03'
+<!-- 		   and b.cr_confno is null -->
+		   and a.cr_prjno = #{PARAM_CR_PRJNO}
+		   and a.cr_syscd = #{PARAM_CR_SYSCD}
+		   and c.cr_itemid = #{PARAM_CR_ITEMID}
+	</select>
+	
+</mapper>

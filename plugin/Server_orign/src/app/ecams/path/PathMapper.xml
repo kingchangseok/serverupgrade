@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="path" >
+
+	<select id="getPath" parameterType="hashmap" resultType="String">
+		select cm_dirpath 
+		from cmm0070
+		where cm_syscd=#{cm_syscd}
+		and cm_dsncd=#{cm_dsncd}
+	</select>
+	
+	<select id="getPathCD" parameterType="hashmap" resultType="String">
+		select cm_dsncd
+		from cmm0070
+		where cm_syscd=#{cm_syscd}
+		and cm_dirpath=#{cm_dirpath}
+		and cm_clsdt is null
+	</select>
+	
+	<select id="getBasePath" parameterType="hashmap" resultType="String">
+		select SYSHOMEPATH(#{cm_syscd}, #{cm_rsrccd})
+		from dual
+		<!-- 
+		select nvl(c.cm_volpath,'/')
+		from cmm0038 a, cmm0030 b, cmm0031 c
+		where b.cm_syscd = #{cm_syscd}
+		and b.cm_syscd = c.cm_syscd
+		and b.cm_dirbase = c.cm_svrcd
+        and c.cm_closedt is null
+        and c.cm_syscd = a.cm_syscd
+        and c.cm_svrcd = a.cm_svrcd
+        and c.cm_seqno = a.cm_seqno
+		and a.cm_rsrccd = #{cm_rsrccd}
+		 -->
+	</select>
+	
+	<select id="getHomePath" parameterType="String" resultType="String">
+		select nvl(a.cm_volpath,'/')
+		from cmm0031 a, cmm0030 b
+		where a.cm_syscd = #{syscd}
+		and a.cm_syscd = b.cm_syscd
+		and a.cm_svrcd = b.cm_dirbase
+		and a.cm_closedt is null
+	</select>
+	
+	<select id="getProjectPath" parameterType="hashmap" resultType="String">
+		select '/'||c.cm_deptcd
+		  from cmm0030 a, cmm0034 b, cmm0102 c 
+		 where a.cm_syscd = #{cm_syscd}
+		   and b.cm_jobcd = #{cm_jobcd}
+		   and substr(a.cm_sysinfo,16,1)='1'
+		   and a.cm_syscd = b.cm_syscd
+		   and b.cm_jobcd = c.cm_jobcd
+		   and b.cm_closedt is null
+	</select>
+	
+	<select id="getMaxDsnCD" parameterType="String" resultType="String">
+		select lpad(to_number(max(cm_dsncd)) + 1,7,'0') max
+		from cmm0070
+		where cm_syscd=#{id}
+	</select>
+	
+	<select id="getTempPath" parameterType="String" resultType="String">
+		SELECT	cm_path
+		FROM	CMM0012
+		WHERE	cm_stno		= 'ECAMS'
+		AND		cm_pathcd	= #{cm_patchcd}
+	</select>
+	
+	<insert id="insert_cmm0070" parameterType="hashmap">
+		insert into cmm0070 (CM_SYSCD,CM_DSNCD,CM_DIRPATH,CM_EDITOR,CM_OPENDT,CM_LASTUPDT,CM_RUNSTA)
+		values (#{cm_syscd},#{cm_dsncd},#{cm_dirpath},#{cm_userid}, SYSDATE, SYSDATE, '0')
+	</insert>
+	
+	<insert id="insert_cmm0072" parameterType="hashmap">
+		insert into cmm0072 (CM_SYSCD,CM_DSNCD,CM_RSRCCD)
+		values (#{cm_syscd},#{cm_dsncd}, #{cm_rsrccd})
+	</insert>
+
+	<insert id="insert_cmm0073" parameterType="hashmap">
+		insert into cmm0073 (CM_SYSCD,CM_DSNCD,CM_JOBCD)
+		values (#{cm_syscd},#{cm_dsncd}, #{cm_jobcd})
+	</insert>
+	
+	
+	
+</mapper>

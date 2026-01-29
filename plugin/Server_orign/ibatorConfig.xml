@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE generatorConfiguration
+  PUBLIC "-//mybatis.org//DTD MyBatis Generator Configuration 1.0//EN"
+  "http://mybatis.org/dtd/mybatis-generator-config_1_0.dtd">
+<generatorConfiguration>
+  <classPathEntry location="/ant/lib/ojdbc5.jar" />
+  <context id="context1" targetRuntime="MyBatis3">
+	<jdbcConnection driverClass="oracle.jdbc.driver.OracleDriver"
+        connectionURL="jdbc:oracle:thin:@10.241.58.49:1521:SCMDEV"
+        userId="ecamsdev"
+        password="ecamsdev">
+    </jdbcConnection> 
+    
+    <javaTypeResolver >
+      <property name="forceBigDecimals" value="true" />
+    </javaTypeResolver>    
+
+    <javaModelGenerator targetPackage="app.ecams.file.model" targetProject="src">
+      <property name="enableSubPackages" value="true" />
+      <property name="trimStrings" value="true" />
+    </javaModelGenerator>
+    <sqlMapGenerator targetPackage="app.ecams.file" targetProject="src">
+    	<property name="enableSubPackages" value="true" />
+    </sqlMapGenerator>
+    
+    <!-- 
+    <javaClientGenerator targetPackage="app.ecams.test.dao" targetProject="src" type="XMLMAPPER">
+    	<property name="enableSubPackages" value="true" />
+    </javaClientGenerator>
+ 	-->
+    <table schema="svn" tableName="cmr0020" domainObjectName="cmr0020"/>
+  </context>
+</generatorConfiguration>

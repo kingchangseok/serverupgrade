@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="syncmapper">
+	<resultMap id="getPgmInfo_Result" type="app.ecams.syncwith.model.SyncWithInfo">
+		<result property="syscd" column="cr_syscd" />
+		<result property="rsrcname" column="cr_rsrcname" />
+		<result property="dirpath" column="cm_dirpath" />
+		<result property="md5sum" column="cr_md5sum" />
+		<result property="status" column="cr_status"/>
+		<result property="itemid" column="cr_itemid"/>
+		<result property="version" column="cr_lstver"/>
+	</resultMap>
+	<!-- replace(c.cm_dirpath, d.cm_volpath, '') cm_dirpath,  -->
+	<select id="getPgmInfo" parameterType="String" resultMap="getPgmInfo_Result">
+		select a.cr_syscd, a.cr_itemid, a.cr_lstver, a.cr_rsrcname, 
+		       substr(c.cm_dirpath, length(d.cm_volpath)+1) cm_dirpath,
+		       b.cr_md5sum, a.cr_status
+		  from cmr0020 a, cmr0025 b, cmm0070 c, cmm0038 d, cmm0036 e
+		 where a.cr_syscd = #{id}
+		   and a.cr_syscd = c.cm_syscd
+		   and a.cr_dsncd = c.cm_dsncd
+		   and a.cr_itemid = b.cr_itemid
+		   and a.cr_lstver = b.cr_ver
+		   and a.cr_syscd = d.cm_syscd
+		   and a.cr_rsrccd = d.cm_rsrccd
+		   and d.cm_svrcd = '01'
+		   and a.cr_syscd = e.cm_syscd
+		   and a.cr_rsrccd = e.cm_rsrccd
+		   and e.cm_closedt is null
+		   and substr(e.cm_info,58,1) = '1'
+	</select>
+</mapper>

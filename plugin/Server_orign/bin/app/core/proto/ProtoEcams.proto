@@ -1,0 +1,246 @@
+package app.core.proto;
+
+option java_package = "app.core.proto";
+option java_outer_classname = "ProtoEcams";
+
+
+message UserInfo {
+	required string id = 1;
+	required string passwd = 2;
+	optional string name = 3;
+	optional string newPasswd = 4;
+}
+
+message SysInfo {
+	required string syscd = 1;
+	optional string	sysmsg = 2;
+	optional RsrcInfoList rsrcinfolist = 3;
+	optional JobInfoList jobinfolist = 4;
+	optional string sysinfo = 5;
+	optional string analyn = 6;
+	optional string prjname = 7;
+}
+
+message SysInfoList {
+	repeated SysInfo sysinfo = 1;
+}
+
+message FileData {
+	required string filename = 1;
+	optional string md5sum = 2;
+	optional int32 version = 3;
+	optional PathInfo pathinfo = 4;
+	optional string editor = 5;
+	optional string lstUser = 6;
+	optional RsrcInfo rsrcinfo = 7;
+	optional JobInfo jobinfo = 8;
+	optional string status = 9;
+	optional string lstdate = 10;
+	optional SysInfo sysinfo = 11;
+	optional string itemid = 12;
+	optional bytes filebytes = 13;
+	optional string reqcd = 14;
+	optional LangInfo langinfo = 15;
+	optional int32 tstver = 16;
+	optional string tstmd5sum = 17;
+	optional string basever = 18;
+	optional string vergbn = 19;
+	optional string viewver = 20;
+	optional string msguse = 21;
+	optional SRInfo srinfo = 22;
+	optional string baseitem = 23;	
+	optional bytes filebytes2 = 24;
+	optional bytes filebytes3 = 25;
+	optional bytes filebytes4 = 26;
+	optional bytes filebytes5 = 27;
+	optional string acptno = 28;
+}
+
+message FileDataList {
+	repeated FileData filedatas = 1;
+}
+
+message HistoryData{
+	required FileData filedata = 1;
+	required string crAcptno = 2;
+	required string crPrcdate = 3;
+	required string crRsrccd = 4;
+	optional string crEditcon = 5;
+	required string crStatus = 6;
+	required string cmUsername = 7;
+	required string cmCodename = 8;
+	required string crQrycd = 9;
+	required string crAcptdate = 10;
+	optional string crVersion = 11;
+	optional string crDevenddt = 12;
+}
+
+message HistoryList{
+	repeated HistoryData historydata = 1;
+}
+
+message BefJobData{
+	required string crAcptno = 1;
+	optional string crAcptdate = 2;
+	optional string crSysmsg = 3;
+	optional string crUsername = 4;
+	optional string crStatus = 5;
+	optional string crSayu = 6;
+}
+
+message BefJobList{
+	repeated BefJobData befjobdata = 1;
+}
+
+message AnalData{
+	required string methid = 1;
+	optional string methseqn = 2;
+	optional string classnm = 3;
+	optional string itemid = 4;
+	optional string calllevel = 5;
+	optional string resrckey = 6;
+	optional string linepos = 7;
+	optional string filename = 8;
+	optional string toresrckey = 9;
+	optional string tomethseqn = 10;
+	optional string tomethid = 11;
+}
+
+message AnalDataList{
+	repeated AnalData analdatas = 1;
+}
+
+message SysCommand {
+	required string command = 1;
+}
+
+message EcamsMessage {
+	required string msgtype = 1;
+	optional UserInfo userinfo = 2;
+	optional FileData filedata = 3;
+	optional FileDataList filedatalist = 4;
+	optional SysCommand syscommand = 5;
+	optional SysInfo sysinfo = 6;
+	optional SysInfoList sysinfolist = 7;
+	optional RequestInfo requestinfo = 8;
+	optional RequestInfoList requestinfolist = 9;
+	optional PathInfo pathinfo = 10;
+	optional CodeInfo codeinfo = 11;
+	optional CodeInfoList codeinfolist = 12;
+	optional int32 totpage = 13;
+	optional int32 pagenum = 14;
+	optional JobInfoList jobinfolist = 15;
+	optional HistoryList historylist = 16;
+	optional LangInfoList langinfolist = 17;
+	optional PrjInfoList prjinfolist = 18;
+	optional BefJobList befjoblist = 19;
+	optional AnalData analdata = 20;
+	optional AnalDataList analdatalist = 21;
+	optional SRInfo srinfo = 22;
+	optional SRInfoList srinfolist = 23;
+	optional string tooltype = 24;
+	optional FileDataVer filedataver = 25;
+}
+
+message PrjInfo {
+	required string scsrno = 1;
+	optional string sbizcode = 2;
+	optional string scsrtitle = 3;
+	optional string semerrequestyn = 4;
+}
+
+message PrjInfoList {
+	repeated PrjInfo prjinfo = 1;
+}
+
+message FileDataVer{
+	repeated FileData filever = 1;
+}
+
+message RsrcInfo {
+	required string rsrccd = 1;
+	optional string	rsrcmsg = 2;
+	optional string exename = 3;
+	optional string cminfo = 4;
+}
+
+message RsrcInfoList{
+	repeated RsrcInfo rsrcinfo = 1;
+}
+
+message JobInfo{
+	required string jobcd = 1;
+	optional string jobname = 2;
+	optional string deptcd = 3;
+}
+
+message JobInfoList{
+	repeated JobInfo jobinfo = 1;
+}
+
+message LangInfo {
+	required string langcd = 1;
+	optional string	langname = 2;
+}
+
+message LangInfoList{
+	repeated LangInfo langinfo = 1;
+}
+
+message CodeInfo{
+	required string macode = 1;
+	optional string micode = 2;
+	optional string codename = 3;
+}
+
+message CodeInfoList{
+	repeated CodeInfo codeinfo = 1;
+}
+
+message PathInfo{
+	required string relativitePath = 1;
+}
+
+message RequestInfo{
+	required string qrycd = 1;
+	optional string sayu = 2;
+	optional string reqcd = 3;
+	optional string reqgbn = 4;
+	optional string gbnsayu = 5;
+	optional string acptno = 6;
+	optional string deployGB = 7;
+	optional string befjobs = 8;
+	optional string svrYN = 9;
+	optional string tstchg = 10;
+	optional string version = 11;
+}
+
+message RequestInfoList{
+	repeated RequestInfo requestinfo = 1;
+}
+
+message SRInfo{
+	optional string ccEditor = 1;
+	optional string ccEditorName = 2;
+	optional string isAdmin = 3;
+	optional string ccSRId = 4;
+	optional string ccStatusCD = 5;
+	optional string ccStatus = 6;
+	optional string ccTitle = 7;
+	optional string ccComment = 8;
+	optional string ccCattype = 9;
+	optional string ccChgtype = 10;
+	optional string ccWorkrank = 11;
+	optional string ccSyscd = 12; 
+	optional string cmSysmsg = 13;
+}
+
+message SRInfoList{
+	repeated SRInfo srinfo = 1;
+}
+
+message ReturnMsg{
+	required int32	returnval = 1;
+	required string	returnStr = 2;
+	optional EcamsMessage ecamsmsg = 3;
+}

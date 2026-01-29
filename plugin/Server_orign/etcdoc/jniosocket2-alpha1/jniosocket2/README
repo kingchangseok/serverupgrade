@@ -1,0 +1,44 @@
+Introduction
+============
+
+Raining Sockets is a non-blocking sockets based framework which lets you
+instantiate a class that contains complete non-blocking io. A user only
+needs to override the event that he requires to customize, such as
+what to do with arrived (or arriving) data, or what to do when a write
+has completed.
+
+
+Thanks
+======
+
+Rahul Kumar for a first version
+
+
+
+Status
+======
+
+Alpha Release
+
+
+To Do
+=====
+
+1. Logging
+2. Extension for DatagramSocket
+3. Cleanup
+
+
+Contacts
+========
+
+jniosocket homepage:      http://jniosocket.sourceforge.net/
+SourceForge project info: http://sourceforge.net/projects/jniosocket/
+
+
+License
+=======
+
+jniosocket is released under the terms of the LGPL. A copy of the LGPL is provided
+in the LICENSE file.
+

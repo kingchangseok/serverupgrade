@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="analinfo">	
+	<resultMap id="getAnalList_detail_Result" type="app.ecams.anal.model.AnalInfo">
+		<result property="methid" column="Meth_Id" jdbcType="VARCHAR"/>
+		<result property="methseqn" column="Meth_Seqn" jdbcType="VARCHAR"/>
+		<result property="classnm" column="Class_NM" jdbcType="VARCHAR"/>
+		<result property="calllevel" column="CallLevel" jdbcType="VARCHAR"/>
+		<result property="resrckey" column="Resrc_Key" jdbcType="VARCHAR"/>
+		<result property="linepos" column="Line_Pos" jdbcType="VARCHAR"/>
+		<result property="filename" column="FileName" jdbcType="VARCHAR"/>
+		<result property="toresrckey" column="ToResrcKey" jdbcType="VARCHAR"/>
+		<result property="tomethseqn" column="ToMeth_Seqn" jdbcType="VARCHAR"/>
+		<result property="tomethid" column="ToMeth_ID" jdbcType="VARCHAR"/>
+		<result property="itemid" column="" jdbcType="VARCHAR"/>
+	</resultMap>
+	
+	<resultMap id="getAnalList_Method_Result" type="hashmap">
+		<result property="methid" column="Meth_ID" jdbcType="VARCHAR"/>
+		<result property="methseqn" column="Meth_Seqn" jdbcType="VARCHAR"/>
+		<result property="classnm" column="Class_NM" jdbcType="VARCHAR"/>
+		<result property="itemid" column="" jdbcType="VARCHAR"/>
+	</resultMap>
+	
+	<select id="getAnalList_detail" parameterType="java.lang.String" resultMap="getAnalList_detail_Result">
+		{call SP_eCams_ImpactMethodDetail (#{itemid}, #{methid}, #{Depth})}
+	</select>
+	
+	<select id="getAnalList_Method" parameterType="java.lang.String" resultMap="getAnalList_Method_Result">
+<!-- 		{call RELATNO_UPDT(#{acptno})} -->
+		{call SP_eCams_getMethodList (#{itemid})}
+	</select>
+	
+</mapper>

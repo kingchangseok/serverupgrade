@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD iBatis Mapper 3.0 //EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="request">
+	<select id="request_duple_check" parameterType="java.lang.String" resultType="int">
+		select count(*) as cnt
+		from cmr1000
+		where cr_acptno= #{id}
+	</select>
+	
+	<insert id="insertCmr1000" parameterType="hashmap">
+		insert into cmr1000
+		(CR_ACPTNO,CR_SYSCD,CR_SYSGB,CR_JOBCD,CR_ACPTDATE,CR_STATUS,CR_TEAMCD,
+		 CR_PASSOK,CR_PASSCD,
+		<if test="CR_BEFJOB != null" >
+			CR_BEFJOB,
+		</if>
+		<if test="CR_EMGCD != null" >
+			CR_EMGCD,
+		</if>		
+		CR_EDITOR,
+		<if test="CR_SAYU != null" >
+			CR_SAYU,
+		</if>		
+		<if test="CR_PASSSUB != null" >
+			CR_PASSSUB,
+		</if>
+		<if test="CR_SAYUCD != null" >
+			CR_SAYUCD,
+		</if>
+		<if test="CR_DOCNO != null" >
+			CR_DOCNO,
+		</if>
+		<if test="CR_PRCREQ != null" >
+			CR_PRCREQ,
+		</if>
+		<if test="CR_DEVNO != null" >
+			CR_DEVNO,
+		</if>
+		<if test="CR_ITSMID != null" >
+			CR_ITSMID,
+		</if>
+		<if test="CR_ITSMTITLE != null" >
+			CR_ITSMTITLE,
+		</if>
+		<if test="CR_VERSION != null" >
+			CR_VERSION,
+		</if>
+		<if test="CR_SVRYN != null" >
+			CR_SVRYN,
+		</if>
+		    CR_ECLIPSE,CR_QRYCD)
+		values (#{CR_ACPTNO},#{CR_SYSCD},#{CR_SYSGB},#{CR_JOBCD},sysdate,#{CR_STATUS},#{CR_TEAMCD},
+				#{CR_PASSOK},#{CR_PASSCD},
+		<if test="CR_BEFJOB != null" >
+				#{CR_BEFJOB},
+		</if>
+		<if test="CR_EMGCD != null" >
+				#{CR_EMGCD},
+		</if>
+		#{CR_EDITOR},
+		<if test="CR_SAYU != null" >
+				#{CR_SAYU},
+		</if>
+		<if test="CR_PASSSUB != null" >
+				#{CR_PASSSUB},
+		</if>
+		<if test="CR_SAYUCD != null" >
+				#{CR_SAYUCD},
+		</if>
+		<if test="CR_DOCNO != null" >
+				#{CR_DOCNO},
+		</if>
+		<if test="CR_PRCREQ != null" >
+				#{CR_PRCREQ},
+		</if>
+		<if test="CR_DEVNO != null" >
+			#{CR_DEVNO},
+		</if>
+		<if test="CR_ITSMID != null" >
+			#{CR_ITSMID},
+		</if>
+		<if test="CR_ITSMTITLE != null" >
+			#{CR_ITSMTITLE},
+		</if>
+		<if test="CR_VERSION != null" >
+			#{CR_VERSION},
+		</if>
+		<if test="CR_SVRYN != null" >
+			#{CR_SVRYN},
+		</if>
+			'E',#{CR_QRYCD})
+	</insert>
+	<!-- DECODE(#{CR_QRYCD},'12','N','04','Y','Y'),#{CR_QRYCD},DECODE(#{CR_QRYCD},'04',#{CR_SVRYN},'N')) -->
+	
+	<insert id="insertCmr1010_default" parameterType="hashmap">
+		insert into cmr1010
+		(CR_ACPTNO,CR_SERNO,CR_SYSCD,CR_SYSGB,CR_JOBCD,CR_STATUS,CR_QRYCD,
+		CR_RSRCCD,CR_DSNCD,CR_RSRCNAME,CR_RSRCNAM2,CR_VERSION,
+		CR_EDITOR,CR_BASEITEM,
+		<if test="CR_LANGCD != null" >
+			CR_LANGCD,
+		</if>
+		<if test="CR_BASENO != null" >
+			CR_BASENO,
+		</if>
+		<if test="CR_EDITCON != null" >
+			CR_EDITCON,
+		</if>
+		<if test="CR_CHGCD != null" >
+			CR_CHGCD,
+		</if>
+		<if test="CR_SRCCHG != null" >
+			CR_SRCCHG,
+		</if>
+		<if test="CR_SRCCMP != null" >
+			CR_SRCCMP,
+		</if>
+		<if test="CR_TSTCHG != null" >
+			CR_TSTCHG,
+		</if>
+		<if test="CR_PRIORITY != null" >
+			CR_PRIORITY,
+		</if>
+		<if test="CR_APLYDATE != null" >
+			CR_APLYDATE,
+		</if>
+		<if test="CR_ANALYN != null" >
+			CR_ANALYN,
+		</if>
+		<if test="CR_BEFVER != null" >
+			CR_BEFVER,
+		</if>
+		<if test="CR_COACPT != null" >
+			CR_COACPT,
+		</if>
+		<if test="CR_CONFNO != null" >
+			CR_CONFNO,
+		</if>
+		<if test="CR_PGMTYPE != null" >
+			CR_PGMTYPE,
+		</if>
+		CR_VERYN,
+		<if test="CR_SVRYN != null" >
+			CR_SVRYN,
+		</if>
+		<if test="CR_BEFVIEWVER != null" >
+			CR_BEFVIEWVER,
+		</if>
+		<if test="CR_AFTVIEWVER != null" >
+			CR_AFTVIEWVER,
+		</if>
+		CR_SYSTYPE, CR_ITEMID, CR_STORY) values(
+		#{CR_ACPTNO},#{CR_SERNO},#{CR_SYSCD},#{CR_SYSGB},#{CR_JOBCD},#{CR_STATUS},#{CR_QRYCD},
+		#{CR_RSRCCD},#{CR_DSNCD},#{CR_RSRCNAME},#{CR_RSRCNAM2},#{CR_VERSION},
+		#{CR_EDITOR},#{CR_BASEITEM},
+		<if test="CR_LANGCD != null" >
+			#{CR_LANGCD},
+		</if>
+		<if test="CR_BASENO != null" >
+			#{CR_BASENO},
+		</if>		
+		<if test="CR_EDITCON != null" >
+			#{CR_EDITCON},
+		</if>
+		<if test="CR_CHGCD != null" >
+			#{CR_CHGCD},
+		</if>
+		<if test="CR_SRCCHG != null" >
+			#{CR_SRCCHG},
+		</if>
+		<if test="CR_SRCCMP != null" >
+			#{CR_SRCCMP},
+		</if>
+		<if test="CR_TSTCHG != null" >
+			#{CR_TSTCHG},
+		</if>
+		<if test="CR_PRIORITY != null" >
+			#{CR_PRIORITY},
+		</if>
+		<if test="CR_APLYDATE != null" >
+			#{CR_APLYDATE},
+		</if>
+		<if test="CR_ANALYN != null" >
+			#{CR_ANALYN},
+		</if>
+		<if test="CR_BEFVER != null" >
+			#{CR_BEFVER},
+		</if>
+		<if test="CR_COACPT != null" >
+			#{CR_COACPT},
+		</if>
+		<if test="CR_CONFNO != null" >
+			#{CR_CONFNO},
+		</if>
+		<if test="CR_PGMTYPE != null" >
+			#{CR_PGMTYPE},
+		</if>
+		(select decode(substr(cm_info,12,1), '1', 'Y', 'N') from cmm0036 where cm_syscd=#{CR_SYSCD} and cm_rsrccd=#{CR_RSRCCD}),
+		<if test="CR_SVRYN != null" >
+			#{CR_SVRYN},
+		</if>
+		<if test="CR_BEFVIEWVER != null" >
+			#{CR_BEFVIEWVER},
+		</if>
+		<if test="CR_AFTVIEWVER != null" >
+			#{CR_AFTVIEWVER},
+		</if>
+		(SELECT CM_SYSTYPE FROM CMM0030 WHERE CM_SYSCD = #{CR_SYSCD}),
+		#{CR_ITEMID}, (SELECT CR_STORY FROM CMR0020 WHERE CR_ITEMID = #{CR_ITEMID}) )	
+	</insert>
+	
+	<update id="updateCmr1010_setcncl" parameterType="hashmap">
+		update cmr1010 set
+			CR_STATUS = #{SET_CR_STATUS} ,
+			CR_PRCDATE = sysdate
+		where cr_acptno = #{PARAM_CR_ACPTNO}
+		and cr_itemid = #{PARAM_CR_ITEMID}
+	</update>
+	
+	<update id="updateConfCmr1010" statementType="CALLABLE" parameterType="hashmap">
+<!-- 		update cmr1010 set -->
+<!-- 			cr_confno= #{CR_CONFNO} -->
+<!-- 		where cr_confno is null   -->
+<!-- 		and cr_itemid=#{CR_ITEMID}  -->
+<!-- 		and substr(cr_acptno,5,2)='03' -->
+		{call RELATNO_UPDT(#{acptno})}
+	</update>
+	
+	<select id="getAcptno" parameterType="hashmap" resultType="java.lang.String">
+		select cr_acptno
+		from cmr1010
+		where cr_acptno in
+		<foreach item="item" index="index" collection="acptlist" open="(" separator="," close=")">
+			#{item}
+		</foreach>
+		and cr_itemid = #{CR_ITEMID}
+	</select>
+	
+	<update id="updateCmr1010_confno" parameterType="hashmap">
+<!-- 		update cmr1010 -->
+<!-- 		set    cr_confno = #{CR_ACPTNO} -->
+<!-- 		where  cr_itemid = #{CR_ITEMID} -->
+<!-- 		  and  cr_confno is null -->
+<!-- 		  and  substr(cr_acptno,5,2) != '04' -->
+		{call RELATNO_UPDT(#{CR_ACPTNO})}
+	</update>
+	
+</mapper>
